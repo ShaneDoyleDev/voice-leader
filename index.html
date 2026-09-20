@@ -727,8 +727,13 @@
     return -1;
   }
 
+  function setCursor(p){
+    svg.style.cursor = drag ? "grabbing" : (hitNote(p) > -1 ? "grab" : "crosshair");
+  }
+
   svg.addEventListener("pointermove", function(e){
     var p = local(e);
+    setCursor(p);
     if (drag){
       var t = targetAt(p), n = state.notes[drag.index];
       if ((t.slot !== n.slot || t.step !== n.step) && indexAt(t.slot, t.step) === -1){
@@ -748,15 +753,20 @@
   svg.addEventListener("pointerleave", function(){
     if (drag) return;
     hover = null;
+    svg.style.cursor = "crosshair";
     render();
   });
   svg.addEventListener("pointerdown", function(e){
     var p = local(e), hit = hitNote(p);
     svg.setPointerCapture(e.pointerId);
     press = { id:e.pointerId, x:p.x, y:p.y };
-    if (hit > -1){ drag = { index:hit, moved:false }; render(); }
+    if (hit > -1){ drag = { index:hit, moved:false }; setCursor(p); render(); }
   });
-  svg.addEventListener("pointercancel", function(){ press = null; drag = null; render(); });
+  svg.addEventListener("pointercancel", function(){
+    press = null; drag = null;
+    svg.style.cursor = "crosshair";
+    render();
+  });
   svg.addEventListener("pointerup", function(e){
     /* only a release that began with a press on the staff counts */
     if (!press || press.id !== e.pointerId) return;
@@ -766,7 +776,7 @@
       var d = drag; drag = null;
       if (d.moved) play(state.notes[d.index].slot, state.notes[d.index].step);
       else state.notes.splice(d.index, 1);
-      hover = targetAt(p); render(); return;
+      hover = targetAt(p); setCursor(p); render(); return;
     }
     if (Math.hypot(p.x - from.x, p.y - from.y) > 10){  /* a drag across empty staff, not a click */
       hover = targetAt(p); render(); return;
@@ -774,6 +784,7 @@
     var t = targetAt(p);
     if (indexAt(t.slot, t.step) === -1){ state.notes.push(t); play(t.slot, t.step); }
     hover = t;
+    setCursor(p);
     render();
   });
 
