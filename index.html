@@ -143,8 +143,6 @@
     align-self:center; margin:0 4px;
     color:var(--ink-soft); font-style:italic; font-size:13px;
   }
-  .presets button{font-size:12px;padding:6px 10px;font-family:"Spectral",Georgia,serif;font-size:13px}
-  .presetlabel{font-size:11px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-soft)}
 
   .start{
     display:flex; flex-wrap:wrap; align-items:center; gap:12px;
@@ -221,9 +219,7 @@
       <div class="numerals" id="numerals"></div>
       <div class="seq" id="seq"></div>
       <p class="keyline" id="progline"></p>
-      <div class="row presets">
-        <span class="presetlabel">Presets</span>
-        <span id="presetlist" style="display:contents"></span>
+      <div class="row">
         <span class="spacer"></span>
         <button type="button" class="ghost" id="undo">Undo</button>
         <button type="button" class="ghost" id="clearprog">Clear</button>
@@ -282,7 +278,6 @@
   var ACC_TEXT = {"-2":"bb","-1":"♭","0":"","1":"♯","2":"x"};
   var ROMAN = ["I","II","III","IV","V","VI","VII"];
   var DEGREES = [1,2,3,4,5,6,7];
-  var PRESETS = [[1,4,5,1],[1,5,6,4],[2,5,1],[1,6,4,5],[1,5,4,1]];
 
   var KEYS = {
     major:[["G♭",-6],["D♭",-5],["A♭",-4],["E♭",-3],["B♭",-2],["F",-1],
@@ -927,23 +922,11 @@
       seq.appendChild(b);
     });
   }
-  function drawPresets(){
-    var list = document.getElementById("presetlist");
-    list.innerHTML = "";
-    PRESETS.forEach(function(degrees){
-      var b = document.createElement("button");
-      b.type = "button";
-      b.className = "ghost";
-      b.textContent = degrees.map(numeralOf).join("\u2013");
-      b.addEventListener("click", function(){ state.chords = degrees.slice(); drawSetup(); });
-      list.appendChild(b);
-    });
-  }
   function drawSetup(){
     /* keep the tonic legal when the mode flips */
     var names = KEYS[state.mode].map(function(k){ return k[0]; });
     if (names.indexOf(state.tonic) === -1) state.tonic = state.mode === "major" ? "C" : "A";
-    drawCircle(); drawNumerals(); drawSeq(); drawPresets();
+    drawCircle(); drawNumerals(); drawSeq();
     var progline = document.getElementById("progline");
     progline.hidden = state.mode !== "minor";
     progline.innerHTML = "<b>V</b> and <b>vii\u00B0</b> raise the leading tone; the rest stay diatonic to the natural minor scale.";

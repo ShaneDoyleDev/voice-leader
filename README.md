@@ -5,7 +5,7 @@ An interactive SATB (soprano/alto/tenor/bass) voice-leading trainer. Pick a key 
 ## What it does
 
 - **Pick the key from a circle of fifths.** Majors on the outer ring with their accidental counts, relative minors inside; click a wedge to choose the key and the mode in one move, and the hub draws the signature as notation — a treble clef with its accidentals, not a list of letters. The six o'clock wedge carries the enharmonic pair — click it again to flip F♯/G♭ or D♯m/E♭m. Minor automatically raises the leading tone in V and vii°, no manual accidentals needed.
-- **Build a progression.** Chain together any of the seven diatonic triads — I ii iii IV V vi vii° in major, i ii° III iv V VI vii° in minor — in whatever order you want, up to eight chords. Each numeral shows its own spelling in the current key before you add it, and presets cover the common shapes (I–IV–V–I, ii–V–I, I–V–vi–IV).
+- **Build a progression.** Chain together any of the seven diatonic triads — I ii iii IV V vi vii° in major, i ii° III iv V VI vii° in minor — in whatever order you want, up to eight chords. Each numeral shows its own spelling in the current key before you add it.
 - **Place notes directly on the staff.** Hover near the correct system and a faded preview snaps to the nearest valid pitch; click to drop it in. Already placed a note? Click and drag it to a different valid position.
 - **Real notation.** Actual treble and bass clefs, correct key signature for whichever key you picked, and notes automatically render on whichever staff keeps ledger lines to a minimum (a voice that dips below or climbs above middle C crosses to the other staff rather than piling up ledgers).
 - **Full checklist, every chord:**
