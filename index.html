@@ -497,8 +497,10 @@
     return node;
   }
   var svg = document.getElementById("staff");
-  var layerSlot = el("g",{}), layerStaff = el("g",{}), layerNotes = el("g",{}), layerGhost = el("g",{id:"ghost"});
-  svg.appendChild(layerSlot); svg.appendChild(layerStaff); svg.appendChild(layerNotes); svg.appendChild(layerGhost);
+  var layerSlot = el("g",{}), layerStaff = el("g",{}), layerLabels = el("g",{}),
+      layerNotes = el("g",{}), layerGhost = el("g",{id:"ghost"});
+  svg.appendChild(layerSlot); svg.appendChild(layerStaff); svg.appendChild(layerLabels);
+  svg.appendChild(layerNotes); svg.appendChild(layerGhost);
 
   function accidentalGroup(kind, color){
     var g = el("g", {}), bar;
@@ -563,16 +565,31 @@
       });
     }
 
-    /* Roman numeral and spelling under each chord */
+  }
+
+  /* Roman numeral and spelling under each chord. A chord tone lights up once
+     it is on the staff, in any octave, so the spelling doubles as a tally of
+     what the chord is still missing. */
+  function drawLabels(){
+    while (layerLabels.firstChild) layerLabels.removeChild(layerLabels.firstChild);
     state.chords.forEach(function(degree, i){
       var t = el("text",{x:SLOT_X[i], y:216, fill:"var(--ink)", "text-anchor":"middle",
                          "font-family":"Spectral, Georgia, serif", "font-size":16, "letter-spacing":"0.04em"});
       t.textContent = numeralOf(degree);
-      layerStaff.appendChild(t);
-      var s = el("text",{x:SLOT_X[i], y:232, fill:"var(--ink-soft)", "text-anchor":"middle",
-                         "font-family":"IBM Plex Sans, sans-serif", "font-size":10.5});
-      s.textContent = spell(degree);
-      layerStaff.appendChild(s);
+      layerLabels.appendChild(t);
+
+      var placed = {};
+      state.notes.forEach(function(n){ if (n.slot === i) placed[n.step % 7] = true; });
+      var row = el("text",{x:SLOT_X[i], y:232, "text-anchor":"middle",
+                           "font-family":"IBM Plex Sans, sans-serif", "font-size":10.5});
+      chordLetters(degree).forEach(function(l, k){
+        var on = placed[l] === true;
+        var sp = el("tspan",{ fill: on ? "var(--accent)" : "var(--ink-soft)",
+                              "font-weight": on ? 600 : 400, dx: k ? 3 : 0 });
+        sp.textContent = letterText(degree, l);
+        row.appendChild(sp);
+      });
+      layerLabels.appendChild(row);
     });
   }
 
@@ -629,6 +646,7 @@
     if (drag) layerGhost.appendChild(noteGroup(state.notes[drag.index],{color:"var(--accent)",label:true}));
     else if (focus && indexAt(focus.slot, focus.step) === -1)
       layerGhost.appendChild(noteGroup(focus,{color:"var(--accent)",label:true,opacity:0.55}));
+    drawLabels();
     renderChips();
   }
 
