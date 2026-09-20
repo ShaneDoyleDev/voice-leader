@@ -648,7 +648,7 @@
 
   /* ---------- staff state -------------------------------------------------- */
   var showNames = false, soundOn = true;
-  var hover = null, drag = null, press = null, cursor = null, keyboard = false, justPlaced = null;
+  var hover = null, drag = null, press = null, cursor = null, keyboard = false, lastClick = null;
 
   var MAX_VOICES = 4;                      /* one chord, four voices */
   function slotCount(slot){
@@ -778,27 +778,17 @@
     svg.style.cursor = "crosshair";
     render();
   });
+  /* Double click takes a note off. The native dblclick event is no use here:
+     every render replaces the noteheads, so the browser never sees two clicks
+     on one element. Pair the two completed clicks ourselves, by note rather
+     than by element, and only when neither of them was a drag. */
+  var DOUBLE_MS = 450;
   svg.addEventListener("pointerdown", function(e){
     var p = local(e), hit = hitNote(p);
     svg.setPointerCapture(e.pointerId);
     press = { id:e.pointerId, x:p.x, y:p.y };
     if (hit > -1){ drag = { index:hit, moved:false }; setCursor(p); render(); }
   });
-  /* Double click takes a note off. A double click on empty staff places one on
-     its first click, so the note this gesture just made is left alone. */
-  svg.addEventListener("dblclick", function(e){
-    e.preventDefault();
-    var p = local(e), hit = hitNote(p);
-    if (hit < 0) return;
-    var n = state.notes[hit];
-    if (justPlaced && justPlaced.slot === n.slot && justPlaced.step === n.step &&
-        Date.now() - justPlaced.at < 600) return;
-    state.notes.splice(hit, 1);
-    hover = targetAt(p);
-    setCursor(p);
-    render();
-  });
-
   svg.addEventListener("pointercancel", function(){
     press = null; drag = null;
     svg.style.cursor = "crosshair";
@@ -811,18 +801,29 @@
     press = null;
     if (drag){
       var d = drag; drag = null;
-      if (d.moved) play(state.notes[d.index].slot, state.notes[d.index].step);
-      /* anything else leaves the note put: a press in place, or a drag with
-         nowhere to land — a full chord, a position already taken */
+      var n = state.notes[d.index];
+      var travelled = Math.hypot(p.x - from.x, p.y - from.y) > 10;
+      if (d.moved){
+        play(n.slot, n.step);
+        lastClick = null;
+      } else if (travelled){
+        lastClick = null;      /* a drag with nowhere to land leaves the note put */
+      } else if (lastClick && lastClick.slot === n.slot && lastClick.step === n.step &&
+                 Date.now() - lastClick.at < DOUBLE_MS){
+        state.notes.splice(d.index, 1);      /* second click of a double — take it off */
+        lastClick = null;
+      } else {
+        lastClick = { slot:n.slot, step:n.step, at:Date.now() };   /* maybe the first of two */
+      }
       hover = targetAt(p); setCursor(p); render(); return;
     }
     if (Math.hypot(p.x - from.x, p.y - from.y) > 10){  /* a drag across empty staff, not a click */
       hover = targetAt(p); render(); return;
     }
     var t = targetAt(p);
+    lastClick = null;
     if (indexAt(t.slot, t.step) === -1 && !slotFull(t.slot)){
       state.notes.push(t);
-      justPlaced = { slot:t.slot, step:t.step, at:Date.now() };
       play(t.slot, t.step);
     }
     hover = t;
