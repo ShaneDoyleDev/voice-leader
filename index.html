@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Grand Staff Sketchpad</title>
+<title>Voice Leader</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Spectral:ital,wght@0,500;0,600;1,500&display=swap">
@@ -54,18 +54,12 @@
     gap:20px;
   }
 
-  .eyebrow{
-    margin:0 0 6px;
-    font-size:11px; font-weight:600; letter-spacing:.16em;
-    text-transform:uppercase; color:var(--accent);
-  }
   h1{
     margin:0;
     font-family:"Spectral", Georgia, serif;
     font-weight:600; font-size:clamp(28px,5vw,40px);
     letter-spacing:-.01em; text-wrap:balance;
   }
-  .lede{margin:10px 0 0;max-width:58ch;color:var(--ink-soft)}
 
   .panel{
     background:var(--surface);
@@ -205,9 +199,7 @@
 <body>
 <div class="wrap">
   <header>
-    <p class="eyebrow">Voice Leader</p>
-    <h1>Grand Staff Sketchpad</h1>
-    <p class="lede" id="lede">Choose a key and build a progression in Roman numerals. The staff opens in that key, with one position per chord for you to voice.</p>
+    <h1>Voice Leader</h1>
   </header>
 
   <!-- ---------- setup ---------- -->
@@ -866,8 +858,6 @@
     cursor = { slot:0, step:30, staff:"treble" };
     document.getElementById("stagekey").textContent = keyName();
     document.getElementById("stageprog").textContent = state.chords.map(numeralOf).join(" – ");
-    document.getElementById("lede").textContent =
-      "Hover either staff and the faded note snaps to the nearest line or space. Click to place it, drag to move it, click again to take it off.";
     setup.hidden = true;
     stage.hidden = false;
     drawStaff();
@@ -877,8 +867,6 @@
   document.getElementById("edit").addEventListener("click", function(){
     stage.hidden = true;
     setup.hidden = false;
-    document.getElementById("lede").textContent =
-      "Choose a key and build a progression in Roman numerals. The staff opens in that key, with one position per chord for you to voice.";
     drawSetup();
   });
 
