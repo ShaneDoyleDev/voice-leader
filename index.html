@@ -616,6 +616,34 @@
     });
   }
 
+  /* A note pops in when it is placed: it lands a little small and eases up to
+     size. The scale is a function of elapsed time rather than a CSS animation,
+     because every render rebuilds the noteheads and a CSS animation would
+     restart from zero on each one — one twitch of the mouse and it stutters. */
+  var POP_MS = 180, POP_FROM = 0.78, popping = null, popFrame = null;
+  function reducedMotion(){
+    try { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; }
+    catch (e) { return false; }
+  }
+  function popScale(note){
+    if (!popping || popping.slot !== note.slot || popping.step !== note.step) return 1;
+    var t = Math.min(1, (performance.now() - popping.at) / POP_MS);
+    return POP_FROM + (1 - POP_FROM) * (1 - Math.pow(1 - t, 3));   /* ease out */
+  }
+  function startPop(slot, step){
+    if (reducedMotion()) return;
+    popping = { slot:slot, step:step, at:performance.now() };
+    if (popFrame) cancelAnimationFrame(popFrame);
+    (function frame(){
+      if (!popping) return;
+      if (performance.now() - popping.at >= POP_MS){
+        popping = null; popFrame = null; render(); return;
+      }
+      render();
+      popFrame = requestAnimationFrame(frame);
+    })();
+  }
+
   function noteGroup(note, opts){
     var g = el("g",{}), x = SLOT_X[note.slot], y = yOf(note.step), color = opts.color;
     var def = STAVES[note.staff], n = ledgerCount(note.staff, note.step), i, ly;
@@ -643,6 +671,10 @@
       g.appendChild(t);
     }
     if (opts.opacity != null) g.setAttribute("opacity", opts.opacity);
+    var scale = opts.pop === false ? 1 : popScale(note);
+    if (scale !== 1)
+      g.setAttribute("transform", "translate(" + x + "," + y + ") scale(" + scale.toFixed(4) +
+                     ") translate(" + (-x) + "," + (-y) + ")");
     return g;
   }
 
@@ -682,7 +714,7 @@
         full.textContent = "4 voices";
         layerGhost.appendChild(full);
       } else {
-        layerGhost.appendChild(noteGroup(focus,{color:"var(--accent)",label:true,opacity:0.55}));
+        layerGhost.appendChild(noteGroup(focus,{color:"var(--accent)",label:true,opacity:0.55,pop:false}));
       }
     }
     drawLabels();
@@ -825,6 +857,7 @@
     if (indexAt(t.slot, t.step) === -1 && !slotFull(t.slot)){
       state.notes.push(t);
       play(t.slot, t.step);
+      startPop(t.slot, t.step);
     }
     hover = t;
     setCursor(p);
@@ -846,6 +879,7 @@
         else if (!slotFull(cursor.slot)){
           state.notes.push({slot:cursor.slot, step:cursor.step, staff:cursor.staff});
           play(cursor.slot, cursor.step);
+          startPop(cursor.slot, cursor.step);
         }
         break;
       case "Backspace": case "Delete":
