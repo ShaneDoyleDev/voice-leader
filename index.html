@@ -249,7 +249,7 @@
     <div class="panel" style="margin-top:12px">
       <div class="staffwrap" id="staffwrap" tabindex="0" role="application"
            aria-label="Grand staff. Arrow keys move the cursor, Enter places or removes a note.">
-        <svg id="staff" viewBox="0 0 640 244" aria-hidden="true"></svg>
+        <svg id="staff" viewBox="0 0 640 256" aria-hidden="true"></svg>
       </div>
       <div class="toolbar">
         <button type="button" id="btn-names" aria-pressed="false">Note names</button>
@@ -294,28 +294,39 @@
 
   /* ---------- staff geometry -------------------------------------------- */
   var S = 12, HALF = S / 2;
-  var TOP_STEP = 38, Y_TOP = 60;        /* F5 sits on the top treble line */
   var STAFF_L = 30, STAFF_R = 612, SIG_X = 92;
-  var MIN_STEP = 16, MAX_STEP = 42;     /* E2 to C6 — the practical SATB span */
-  var STAVES = { treble:{ top:38, bottom:30, mid:34 }, bass:{ top:26, bottom:18, mid:22 } };
+  /* Each staff carries its own top line and the y it is drawn at, so the two
+     can sit any distance apart. A pitch therefore has no single height: with
+     the staves further apart than the two spaces that would put middle C
+     exactly between them, middle C below the treble and middle C above the
+     bass are different heights. Every position is a step plus its staff.
+     Between them the two staves cover E2 to C6, the practical SATB span. */
+  var STAVES = {
+    treble:{ top:38, bottom:30, mid:34, topY:60,  lowest:28, highest:42 },   /* C4 to C6 */
+    bass:  { top:26, bottom:18, mid:22, topY:144, lowest:16, highest:28 }    /* E2 to C4 */
+  };
+  var MID_Y = (STAVES.treble.topY + 4 * S + STAVES.bass.topY) / 2;
   /* where each accidental of a key signature sits, in signature order */
   var SIG_STEPS = {
     sharp:{ treble:[38,35,39,36,33,37,34], bass:[24,21,25,22,19,23,20] },
     flat: { treble:[34,37,33,36,32,35,31], bass:[20,23,19,22,18,21,17] }
   };
 
-  function yOf(step){ return Y_TOP + (TOP_STEP - step) * HALF; }
-  function stepAt(y){ return clamp(Math.round(TOP_STEP - (y - Y_TOP) / HALF), MIN_STEP, MAX_STEP); }
+  function yOf(step, staff){
+    var s = STAVES[staff || (step >= 28 ? "treble" : "bass")];
+    return s.topY + (s.top - step) * HALF;
+  }
+  function stepAt(y, staff){
+    var s = STAVES[staff];
+    return clamp(Math.round(s.top - (y - s.topY) / HALF), s.lowest, s.highest);
+  }
+  function staffAt(y){ return y < MID_Y ? "treble" : "bass"; }
   function clamp(v,a,b){ return v < a ? a : v > b ? b : v; }
   function ledgerCount(staff, step){
     var s = STAVES[staff];
     if (step > s.top) return Math.floor((step - s.top) / 2);
     if (step < s.bottom) return Math.floor((s.bottom - step) / 2);
     return 0;
-  }
-  function pickStaff(step, preferred){
-    var t = ledgerCount("treble", step), b = ledgerCount("bass", step);
-    return t < b ? "treble" : b < t ? "bass" : preferred;
   }
 
   /* ---------- key and chords --------------------------------------------- */
@@ -497,9 +508,10 @@
   function sigStep(space){ return glyphW(keyAcc() > 0 ? "sharp" : "flat", space) + 1.5; }
   function sigWidth(space){ return Math.abs(keyAcc()) * sigStep(space); }
 
-  function braceD(){
-    var spine = cubic([24,56],[14,76],[21,100],[11,120],40)
-      .concat(cubic([11,120],[21,140],[14,164],[24,184],40).slice(1));
+  function braceD(top, bottom){
+    var mid = (top + bottom) / 2, h = bottom - top;
+    var spine = cubic([24,top],[14,top + 0.156*h],[21,top + 0.344*h],[11,mid],40)
+      .concat(cubic([11,mid],[21,bottom - 0.344*h],[14,bottom - 0.156*h],[24,bottom],40).slice(1));
     return ribbon(spine, widthFn([[0,.6],[.20,4.6],[.38,5.6],[.50,1.4],[.62,5.6],[.80,4.6],[1,.6]]));
   }
 
@@ -520,26 +532,28 @@
     while (layerStaff.firstChild) layerStaff.removeChild(layerStaff.firstChild);
     var i, y, acc = keyAcc(), n = Math.abs(acc);
 
+    var top = STAVES.treble.topY, bottom = yOf(18, "bass");
     for (i = 0; i < 5; i++){
-      y = Y_TOP + i * S;
-      layerStaff.appendChild(el("line",{x1:STAFF_L,y1:y,x2:STAFF_R,y2:y,stroke:"var(--rule)","stroke-width":1.1}));
-      y = yOf(26) + i * S;
-      layerStaff.appendChild(el("line",{x1:STAFF_L,y1:y,x2:STAFF_R,y2:y,stroke:"var(--rule)","stroke-width":1.1}));
+      ["treble","bass"].forEach(function(staff){
+        var ly = STAVES[staff].topY + i * S;
+        layerStaff.appendChild(el("line",{x1:STAFF_L,y1:ly,x2:STAFF_R,y2:ly,
+                                          stroke:"var(--rule)","stroke-width":1.1}));
+      });
     }
-    layerStaff.appendChild(el("path",{d:braceD(),fill:"var(--ink)"}));
-    layerStaff.appendChild(el("line",{x1:STAFF_L,y1:Y_TOP,x2:STAFF_L,y2:yOf(18),stroke:"var(--ink)","stroke-width":2.4}));
-    layerStaff.appendChild(el("line",{x1:598,y1:Y_TOP,x2:598,y2:yOf(18),stroke:"var(--ink)","stroke-width":1.2}));
-    layerStaff.appendChild(el("line",{x1:607,y1:Y_TOP,x2:607,y2:yOf(18),stroke:"var(--ink)","stroke-width":4}));
+    layerStaff.appendChild(el("path",{d:braceD(top - 4, bottom + 4),fill:"var(--ink)"}));
+    layerStaff.appendChild(el("line",{x1:STAFF_L,y1:top,x2:STAFF_L,y2:bottom,stroke:"var(--ink)","stroke-width":2.4}));
+    layerStaff.appendChild(el("line",{x1:598,y1:top,x2:598,y2:bottom,stroke:"var(--ink)","stroke-width":1.2}));
+    layerStaff.appendChild(el("line",{x1:607,y1:top,x2:607,y2:bottom,stroke:"var(--ink)","stroke-width":4}));
 
-    layerStaff.appendChild(glyph("gClef", 46, yOf(32), S, "var(--ink)"));   /* G line */
-    layerStaff.appendChild(glyph("fClef", 46, yOf(24), S, "var(--ink)"));   /* F line */
+    layerStaff.appendChild(glyph("gClef", 46, yOf(32, "treble"), S, "var(--ink)"));   /* G line */
+    layerStaff.appendChild(glyph("fClef", 46, yOf(24, "bass"), S, "var(--ink)"));   /* F line */
 
     /* key signature, one accidental per staff in signature order */
     var kind = acc > 0 ? "sharp" : "flat", stepX = sigStep(S);
     for (i = 0; i < n; i++){
       ["treble","bass"].forEach(function(staff){
         layerStaff.appendChild(glyph(kind, SIG_X + i*stepX,
-                                     yOf(SIG_STEPS[kind][staff][i]), S, "var(--ink)"));
+                                     yOf(SIG_STEPS[kind][staff][i], staff), S, "var(--ink)"));
       });
     }
 
@@ -558,14 +572,14 @@
       });
       var complete = tones.every(function(l){ return count[l] > 0; });
 
-      var t = el("text",{x:SLOT_X[i], y:216, fill: complete ? "var(--accent)" : "var(--ink)",
+      var t = el("text",{x:SLOT_X[i], y:228, fill: complete ? "var(--accent)" : "var(--ink)",
                          "text-anchor":"middle", "font-family":"Spectral, Georgia, serif",
                          "font-size":16, "font-weight": complete ? 600 : 500,
                          "letter-spacing":"0.04em"});
       t.textContent = numeralOf(degree);
       layerLabels.appendChild(t);
 
-      var row = el("text",{x:SLOT_X[i], y:232, "text-anchor":"middle",
+      var row = el("text",{x:SLOT_X[i], y:244, "text-anchor":"middle",
                            "font-family":"IBM Plex Sans, sans-serif", "font-size":10.5});
       var spans = tones.map(function(l, j){
         var on = count[l] > 0;
@@ -582,7 +596,7 @@
         if (!(count[tones[k]] > 1)) continue;
         try {
           var b = spans[k].getBBox();
-          layerLabels.appendChild(el("circle",{cx:b.x + b.width / 2, cy:238, r:1.7,
+          layerLabels.appendChild(el("circle",{cx:b.x + b.width / 2, cy:250, r:1.7,
                                                fill:"var(--accent)"}));
         } catch (e) { /* no layout yet — the dot reappears on the next render */ }
       }
@@ -618,11 +632,11 @@
   }
 
   function noteGroup(note, opts){
-    var g = el("g",{}), x = SLOT_X[note.slot], y = yOf(note.step), color = opts.color;
+    var g = el("g",{}), x = SLOT_X[note.slot], y = yOf(note.step, note.staff), color = opts.color;
     var def = STAVES[note.staff], n = ledgerCount(note.staff, note.step), i, ly;
     var half = glyphW("noteheadBlack", S) / 2;
     for (i = 1; i <= n; i++){
-      ly = note.step > def.top ? yOf(def.top + i*2) : yOf(def.bottom - i*2);
+      ly = note.step > def.top ? yOf(def.top + i*2, note.staff) : yOf(def.bottom - i*2, note.staff);
       g.appendChild(el("line",{x1:x-half-4, y1:ly, x2:x+half+4, y2:ly,
                                stroke:color, "stroke-width":1.4}));
     }
@@ -674,7 +688,7 @@
       while (l.firstChild) l.removeChild(l.firstChild);
     });
     var focus = drag ? state.notes[drag.index] : (hover || (keyboard ? cursor : null));
-    if (focus) layerSlot.appendChild(el("rect",{x:SLOT_X[focus.slot]-22,y:44,width:44,height:160,rx:3,fill:"var(--accent-soft)"}));
+    if (focus) layerSlot.appendChild(el("rect",{x:SLOT_X[focus.slot]-22,y:44,width:44,height:172,rx:3,fill:"var(--accent-soft)"}));
     state.notes.forEach(function(n,i){
       if (drag && drag.index === i) return;
       layerNotes.appendChild(noteGroup(n,{
@@ -747,8 +761,8 @@
     return pt.matrixTransform(svg.getScreenCTM().inverse());
   }
   function targetAt(p){
-    var step = stepAt(p.y);
-    return { slot:slotAt(p.x), step:step, staff:pickStaff(step, p.y < yOf(28) ? "treble" : "bass") };
+    var staff = staffAt(p.y);
+    return { slot:slotAt(p.x), step:stepAt(p.y, staff), staff:staff };
   }
   /* The note under the pointer is the one at the position the pointer snaps
      to. Measuring a box around each notehead instead would reach further than
@@ -845,11 +859,21 @@
 
   /* ---------- keyboard ------------------------------------------------------ */
   var wrap = document.getElementById("staffwrap");
+  /* one step at a time, changing staff at middle C — the one pitch both
+     staves can write, which is why crossing lands on it twice */
+  function moveCursor(dir){
+    var s = STAVES[cursor.staff], next = cursor.step + dir;
+    if (next > s.highest){
+      if (cursor.staff === "bass"){ cursor.staff = "treble"; cursor.step = STAVES.treble.lowest; }
+    } else if (next < s.lowest){
+      if (cursor.staff === "treble"){ cursor.staff = "bass"; cursor.step = STAVES.bass.highest; }
+    } else cursor.step = next;
+  }
   wrap.addEventListener("keydown", function(e){
     var handled = true, i;
     switch (e.key){
-      case "ArrowUp":    cursor.step = clamp(cursor.step + 1, MIN_STEP, MAX_STEP); break;
-      case "ArrowDown":  cursor.step = clamp(cursor.step - 1, MIN_STEP, MAX_STEP); break;
+      case "ArrowUp":    moveCursor(1); break;
+      case "ArrowDown":  moveCursor(-1); break;
       case "ArrowLeft":  cursor.slot = clamp(cursor.slot - 1, 0, state.chords.length - 1); break;
       case "ArrowRight": cursor.slot = clamp(cursor.slot + 1, 0, state.chords.length - 1); break;
       case "Enter": case " ":
@@ -869,7 +893,6 @@
     }
     if (!handled) return;
     e.preventDefault();
-    cursor.staff = pickStaff(cursor.step, cursor.staff);
     keyboard = true; hover = null; render();
   });
   wrap.addEventListener("focus", function(){ keyboard = true; render(); });
