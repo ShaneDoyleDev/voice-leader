@@ -31,4 +31,6 @@ Root-position triads only. All seven diatonic degrees are available; in minor, V
 
 ## Tech
 
-Single self-contained HTML file. No build step, no external services — just open it in a browser. All rendering is hand-drawn SVG (staff, clefs, noteheads, key signatures); all the theory (scales, chord spelling, the rule checks) is plain JavaScript with no external libraries.
+Single self-contained HTML file. No build step, no external services — just open it in a browser. Everything is drawn as SVG: the staff, brace, noteheads and key-signature accidentals are generated in code, and the two clefs are real engraved outlines. All the theory (scales, chord spelling, the rule checks) is plain JavaScript with no external libraries.
+
+The treble and bass clef outlines were extracted from [Bravura](https://github.com/steinbergmedia/bravura), Steinberg's reference SMuFL font, and inlined as SVG path data — so the page loads no font and makes no network request, but the clefs are the genuine engraved shapes. Bravura is © Steinberg Media Technologies GmbH, licensed under the SIL Open Font License 1.1.
