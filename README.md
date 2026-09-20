@@ -8,7 +8,7 @@ An interactive SATB (soprano/alto/tenor/bass) voice-leading trainer. Pick a key 
 - **Build a progression.** Chain together any of the seven diatonic triads — I ii iii IV V vi vii° in major, i ii° III iv V VI vii° in minor — in whatever order you want, up to eight chords. Each numeral shows its own spelling in the current key before you add it.
 - **The chord spelling keeps score.** Under each Roman numeral sits the chord's spelling; each tone lights up once you have placed it, in any octave, so you can see at a glance which tone the chord is still missing. The numeral itself lights up when all three tones are there, and a dot under a tone means you have doubled it.
 - **Four voices to a chord.** Each chord takes at most four notes, SATB. Once it has them the ghost preview stops offering a fifth and the column says so, and a note dragged in from elsewhere is turned away.
-- **Place notes directly on the staff.** Hover near the correct system and a faded preview snaps to the nearest valid pitch; click to drop it in. Already placed a note? Click and drag it to a different valid position.
+- **Place notes directly on the staff.** Hover near the correct system and a faded preview snaps to the nearest line or space; click to drop it in. Drag a placed note to move it — to another pitch or another chord — and double-click it to take it off. The cursor turns to a hand over a note so you can see what is draggable.
 - **Real notation.** Actual treble and bass clefs, correct key signature for whichever key you picked, and notes automatically render on whichever staff keeps ledger lines to a minimum (a voice that dips below or climbs above middle C crosses to the other staff rather than piling up ledgers).
 - **Full checklist, every chord:**
   - All three chord tones present, and what's doubled
@@ -21,7 +21,7 @@ An interactive SATB (soprano/alto/tenor/bass) voice-leading trainer. Pick a key 
 
 1. Pick a tonic and major/minor.
 2. Tap the chord chips to build your progression, then **Begin voicing**.
-3. For each chord, select a voice tab and place its note (hover + click, or drag an existing note to change it).
+3. For each chord, place its notes: hover and click to add, drag to move, double-click to remove.
 4. **Confirm chord** to run the checklist. Fix and re-check, or move on to the next chord.
 5. At the end, start a new progression to try another key or shape.
 

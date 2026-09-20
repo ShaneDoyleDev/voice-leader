@@ -257,6 +257,7 @@
     <div class="readout" style="margin-top:20px">
       <h2>On the staff</h2>
       <ul class="chips" id="chips" aria-live="polite"></ul>
+      <p class="hint">Click a line or a space to place a note, drag it to move it, double-click it to take it off.</p>
       <p class="hint">Keyboard: <kbd>Tab</kbd> to the staff, <kbd>←</kbd> <kbd>→</kbd> for chord, <kbd>↑</kbd> <kbd>↓</kbd> for pitch, <kbd>Enter</kbd> to place or remove.</p>
     </div>
   </section>
@@ -643,7 +644,7 @@
 
   /* ---------- staff state -------------------------------------------------- */
   var showNames = false, soundOn = true;
-  var hover = null, drag = null, press = null, cursor = null, keyboard = false;
+  var hover = null, drag = null, press = null, cursor = null, keyboard = false, justPlaced = null;
 
   var MAX_VOICES = 4;                      /* one chord, four voices */
   function slotCount(slot){
@@ -779,6 +780,21 @@
     press = { id:e.pointerId, x:p.x, y:p.y };
     if (hit > -1){ drag = { index:hit, moved:false }; setCursor(p); render(); }
   });
+  /* Double click takes a note off. A double click on empty staff places one on
+     its first click, so the note this gesture just made is left alone. */
+  svg.addEventListener("dblclick", function(e){
+    e.preventDefault();
+    var p = local(e), hit = hitNote(p);
+    if (hit < 0) return;
+    var n = state.notes[hit];
+    if (justPlaced && justPlaced.slot === n.slot && justPlaced.step === n.step &&
+        Date.now() - justPlaced.at < 600) return;
+    state.notes.splice(hit, 1);
+    hover = targetAt(p);
+    setCursor(p);
+    render();
+  });
+
   svg.addEventListener("pointercancel", function(){
     press = null; drag = null;
     svg.style.cursor = "crosshair";
@@ -791,17 +807,20 @@
     press = null;
     if (drag){
       var d = drag; drag = null;
-      var travelled = Math.hypot(p.x - from.x, p.y - from.y) > 10;
       if (d.moved) play(state.notes[d.index].slot, state.notes[d.index].step);
-      else if (!travelled) state.notes.splice(d.index, 1);   /* a press in place takes it off */
-      /* a drag with nowhere to land — a full chord, an occupied spot — leaves it put */
+      /* anything else leaves the note put: a press in place, or a drag with
+         nowhere to land — a full chord, a position already taken */
       hover = targetAt(p); setCursor(p); render(); return;
     }
     if (Math.hypot(p.x - from.x, p.y - from.y) > 10){  /* a drag across empty staff, not a click */
       hover = targetAt(p); render(); return;
     }
     var t = targetAt(p);
-    if (indexAt(t.slot, t.step) === -1 && !slotFull(t.slot)){ state.notes.push(t); play(t.slot, t.step); }
+    if (indexAt(t.slot, t.step) === -1 && !slotFull(t.slot)){
+      state.notes.push(t);
+      justPlaced = { slot:t.slot, step:t.step, at:Date.now() };
+      play(t.slot, t.step);
+    }
     hover = t;
     setCursor(p);
     render();
