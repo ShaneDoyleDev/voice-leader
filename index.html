@@ -292,7 +292,7 @@
   };
 
   /* ---------- staff geometry -------------------------------------------- */
-  var S = 12, HALF = S / 2;
+  var S = 12, HALF = S / 2, TREBLE_SCALE = 9.8;
   var TOP_STEP = 38, Y_TOP = 60;        /* F5 sits on the top treble line */
   var STAFF_L = 30, STAFF_R = 612, SIG_X = 92;
   var MIN_STEP = 16, MAX_STEP = 42;     /* E2 to C6 — the practical SATB span */
@@ -549,7 +549,11 @@
     layerStaff.appendChild(el("line",{x1:598,y1:Y_TOP,x2:598,y2:yOf(18),stroke:"var(--ink)","stroke-width":1.2}));
     layerStaff.appendChild(el("line",{x1:607,y1:Y_TOP,x2:607,y2:yOf(18),stroke:"var(--ink)","stroke-width":4}));
 
-    var g1 = el("g",{transform:"translate(64," + yOf(34) + ") scale(" + S + ")"});
+    /* A treble clef curls around the G line, so anchor it there and let it
+       scale about that point: a shade under the staff size, which keeps its
+       tail clear of the bass clef below. */
+    var g1 = el("g",{transform:"translate(64," + yOf(32) + ") scale(" + TREBLE_SCALE +
+                               ") translate(0,-1)"});
     g1.appendChild(el("path",{d:trebleClefD(),fill:"var(--ink)"}));
     layerStaff.appendChild(g1);
     var g2 = el("g",{transform:"translate(44," + yOf(24) + ") scale(" + S + ")"});
