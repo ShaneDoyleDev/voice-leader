@@ -568,28 +568,46 @@
   }
 
   /* Roman numeral and spelling under each chord. A chord tone lights up once
-     it is on the staff, in any octave, so the spelling doubles as a tally of
-     what the chord is still missing. */
+     it is on the staff, in any octave, so the spelling reads as a tally of
+     what the chord still needs: the numeral joins in when all three tones
+     are there, and a dot under a tone means it has been doubled. */
   function drawLabels(){
     while (layerLabels.firstChild) layerLabels.removeChild(layerLabels.firstChild);
     state.chords.forEach(function(degree, i){
-      var t = el("text",{x:SLOT_X[i], y:216, fill:"var(--ink)", "text-anchor":"middle",
-                         "font-family":"Spectral, Georgia, serif", "font-size":16, "letter-spacing":"0.04em"});
+      var tones = chordLetters(degree), count = {}, k;
+      state.notes.forEach(function(n){
+        if (n.slot === i) count[n.step % 7] = (count[n.step % 7] || 0) + 1;
+      });
+      var complete = tones.every(function(l){ return count[l] > 0; });
+
+      var t = el("text",{x:SLOT_X[i], y:216, fill: complete ? "var(--accent)" : "var(--ink)",
+                         "text-anchor":"middle", "font-family":"Spectral, Georgia, serif",
+                         "font-size":16, "font-weight": complete ? 600 : 500,
+                         "letter-spacing":"0.04em"});
       t.textContent = numeralOf(degree);
       layerLabels.appendChild(t);
 
-      var placed = {};
-      state.notes.forEach(function(n){ if (n.slot === i) placed[n.step % 7] = true; });
       var row = el("text",{x:SLOT_X[i], y:232, "text-anchor":"middle",
                            "font-family":"IBM Plex Sans, sans-serif", "font-size":10.5});
-      chordLetters(degree).forEach(function(l, k){
-        var on = placed[l] === true;
+      var spans = tones.map(function(l, j){
+        var on = count[l] > 0;
         var sp = el("tspan",{ fill: on ? "var(--accent)" : "var(--ink-soft)",
-                              "font-weight": on ? 600 : 400, dx: k ? 3 : 0 });
+                              "font-weight": on ? 600 : 400, dx: j ? 3 : 0 });
         sp.textContent = letterText(degree, l);
         row.appendChild(sp);
+        return sp;
       });
       layerLabels.appendChild(row);
+
+      /* dots go on after the row is in the document, where a tspan can be measured */
+      for (k = 0; k < tones.length; k++){
+        if (!(count[tones[k]] > 1)) continue;
+        try {
+          var b = spans[k].getBBox();
+          layerLabels.appendChild(el("circle",{cx:b.x + b.width / 2, cy:238, r:1.7,
+                                               fill:"var(--accent)"}));
+        } catch (e) { /* no layout yet — the dot reappears on the next render */ }
+      }
     });
   }
 
