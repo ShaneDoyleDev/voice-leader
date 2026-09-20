@@ -645,6 +645,14 @@
   var showNames = false, soundOn = true;
   var hover = null, drag = null, press = null, cursor = null, keyboard = false;
 
+  var MAX_VOICES = 4;                      /* one chord, four voices */
+  function slotCount(slot){
+    var n = 0;
+    state.notes.forEach(function(x){ if (x.slot === slot) n++; });
+    return n;
+  }
+  function slotFull(slot){ return slotCount(slot) >= MAX_VOICES; }
+
   function indexAt(slot, step){
     for (var i = 0; i < state.notes.length; i++)
       if (state.notes[i].slot === slot && state.notes[i].step === step) return i;
@@ -662,8 +670,16 @@
       layerNotes.appendChild(noteGroup(n,{color:"var(--ink)",label:showNames}));
     });
     if (drag) layerGhost.appendChild(noteGroup(state.notes[drag.index],{color:"var(--accent)",label:true}));
-    else if (focus && indexAt(focus.slot, focus.step) === -1)
-      layerGhost.appendChild(noteGroup(focus,{color:"var(--accent)",label:true,opacity:0.55}));
+    else if (focus && indexAt(focus.slot, focus.step) === -1){
+      if (slotFull(focus.slot)){
+        var full = el("text",{x:SLOT_X[focus.slot], y:52, "text-anchor":"middle", "font-size":8.5,
+                              fill:"var(--ink-soft)", "font-family":"IBM Plex Sans, sans-serif"});
+        full.textContent = "4 voices";
+        layerGhost.appendChild(full);
+      } else {
+        layerGhost.appendChild(noteGroup(focus,{color:"var(--accent)",label:true,opacity:0.55}));
+      }
+    }
     drawLabels();
     renderChips();
   }
@@ -736,6 +752,7 @@
     setCursor(p);
     if (drag){
       var t = targetAt(p), n = state.notes[drag.index];
+      if (t.slot !== n.slot && slotFull(t.slot)) return;   /* that chord is full */
       if ((t.slot !== n.slot || t.step !== n.step) && indexAt(t.slot, t.step) === -1){
         state.notes[drag.index] = t;
         drag.moved = true;
@@ -774,15 +791,17 @@
     press = null;
     if (drag){
       var d = drag; drag = null;
+      var travelled = Math.hypot(p.x - from.x, p.y - from.y) > 10;
       if (d.moved) play(state.notes[d.index].slot, state.notes[d.index].step);
-      else state.notes.splice(d.index, 1);
+      else if (!travelled) state.notes.splice(d.index, 1);   /* a press in place takes it off */
+      /* a drag with nowhere to land — a full chord, an occupied spot — leaves it put */
       hover = targetAt(p); setCursor(p); render(); return;
     }
     if (Math.hypot(p.x - from.x, p.y - from.y) > 10){  /* a drag across empty staff, not a click */
       hover = targetAt(p); render(); return;
     }
     var t = targetAt(p);
-    if (indexAt(t.slot, t.step) === -1){ state.notes.push(t); play(t.slot, t.step); }
+    if (indexAt(t.slot, t.step) === -1 && !slotFull(t.slot)){ state.notes.push(t); play(t.slot, t.step); }
     hover = t;
     setCursor(p);
     render();
@@ -800,7 +819,10 @@
       case "Enter": case " ":
         i = indexAt(cursor.slot, cursor.step);
         if (i > -1) state.notes.splice(i, 1);
-        else { state.notes.push({slot:cursor.slot, step:cursor.step, staff:cursor.staff}); play(cursor.slot, cursor.step); }
+        else if (!slotFull(cursor.slot)){
+          state.notes.push({slot:cursor.slot, step:cursor.step, staff:cursor.staff});
+          play(cursor.slot, cursor.step);
+        }
         break;
       case "Backspace": case "Delete":
         i = indexAt(cursor.slot, cursor.step);
