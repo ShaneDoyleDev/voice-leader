@@ -18,19 +18,20 @@
     --accent-soft:rgba(169,112,26,.13);
     --line:#D8DBE2;
     --chip:#F1F2F5;
+    --accent-faint:rgba(169,112,26,.06);
     color-scheme:light;
   }
   @media (prefers-color-scheme: dark){
     :root:not([data-theme="light"]){
       --bg:#12141A; --surface:#1B1E25; --ink:#EAE7DF; --ink-soft:#A2A7B4;
       --rule:#8B93A4; --accent:#E0AA4C; --accent-soft:rgba(224,170,76,.16);
-      --line:#2A2E38; --chip:#232730; color-scheme:dark;
+      --line:#2A2E38; --chip:#232730; --accent-faint:rgba(224,170,76,.07); color-scheme:dark;
     }
   }
   :root[data-theme="dark"]{
     --bg:#12141A; --surface:#1B1E25; --ink:#EAE7DF; --ink-soft:#A2A7B4;
     --rule:#8B93A4; --accent:#E0AA4C; --accent-soft:rgba(224,170,76,.16);
-    --line:#2A2E38; --chip:#232730; color-scheme:dark;
+    --line:#2A2E38; --chip:#232730; --accent-faint:rgba(224,170,76,.07); color-scheme:dark;
   }
 
   *{box-sizing:border-box}
@@ -94,12 +95,17 @@
   button.ghost{background:transparent}
   button:disabled{opacity:.45;cursor:not-allowed}
 
-  .tonics{display:flex;flex-wrap:wrap;gap:6px}
-  .tonics button{
-    min-width:44px; padding:8px 6px;
-    font-family:"Spectral", Georgia, serif; font-size:15px; font-weight:500;
-  }
-  .modes button{padding:8px 16px}
+  .circlewrap{align-self:center;width:100%;max-width:360px}
+  .circle{display:block;width:100%;height:auto}
+  .sector{cursor:pointer;outline:none}
+  .sector path{fill:var(--chip);stroke:var(--surface);stroke-width:1.5}
+  .sector:hover path{fill:var(--accent-soft)}
+  .sector.rel path{fill:var(--accent-faint)}
+  .sector.sel path{fill:var(--accent-soft);stroke:var(--accent);stroke-width:2}
+  .sector:focus-visible path{stroke:var(--accent);stroke-width:2.5}
+  .sector text{pointer-events:none;user-select:none;fill:var(--ink)}
+  .sector .count{fill:var(--ink-soft)}
+  @media (prefers-reduced-motion: no-preference){ .sector path{transition:fill .12s ease} }
 
   .keyline{
     margin:0; font-size:13px; color:var(--ink-soft);
@@ -206,11 +212,7 @@
   <section class="panel" id="setup">
     <div class="field">
       <h2>Key</h2>
-      <div class="row modes" id="modes">
-        <button type="button" data-mode="major" class="on">Major</button>
-        <button type="button" data-mode="minor">Minor</button>
-      </div>
-      <div class="tonics" id="tonics"></div>
+      <div class="circlewrap" id="circle"></div>
       <p class="keyline" id="keyline"></p>
     </div>
 
@@ -373,11 +375,19 @@
     return chordLetters(degree).map(function(l){ return letterText(degree, l); }).join(" ");
   }
   function keyName(){ return state.tonic + " " + state.mode; }
-  function sigText(){
-    var acc = keyAcc(), n = Math.abs(acc), order = acc > 0 ? SHARP_ORDER : FLAT_ORDER, i, out = [];
+  function sigCount(acc){
+    var n = Math.abs(acc);
     if (!n) return "no sharps or flats";
+    return n + (acc > 0 ? " sharp" : " flat") + (n > 1 ? "s" : "");
+  }
+  function sigList(acc){
+    var n = Math.abs(acc), order = acc > 0 ? SHARP_ORDER : FLAT_ORDER, out = [], i;
     for (i = 0; i < n; i++) out.push(LETTERS[order[i]] + (acc > 0 ? "♯" : "♭"));
-    return n + (acc > 0 ? " sharp" : " flat") + (n > 1 ? "s" : "") + " — " + out.join(" ");
+    return out.join(" ");
+  }
+  function sigText(){
+    var acc = keyAcc();
+    return acc ? sigCount(acc) + " — " + sigList(acc) : sigCount(acc);
   }
   function scaleText(){
     var t = tonicLetter(), alters = keyAlters(), out = [], i, l;
@@ -766,21 +776,108 @@
 
   /* ---------- setup menu ----------------------------------------------------- */
   var setup = document.getElementById("setup"), stage = document.getElementById("stage");
-  var tonics = document.getElementById("tonics"), seq = document.getElementById("seq");
+  var circle = document.getElementById("circle"), seq = document.getElementById("seq");
   var numerals = document.getElementById("numerals"), keyline = document.getElementById("keyline");
   var begin = document.getElementById("begin"), startnote = document.getElementById("startnote");
   var MAX_CHORDS = 8;
 
-  function drawTonics(){
-    tonics.innerHTML = "";
-    KEYS[state.mode].forEach(function(entry){
-      var b = document.createElement("button");
-      b.type = "button";
-      b.textContent = entry[0];
-      b.setAttribute("aria-pressed", String(entry[0] === state.tonic));
-      b.addEventListener("click", function(){ state.tonic = entry[0]; drawSetup(); });
-      tonics.appendChild(b);
+  /* ---- circle of fifths ---------------------------------------------------
+     Twelve wedges, a fifth apart clockwise: majors outside, their relative
+     minors inside. Six o'clock carries the enharmonic pair, so clicking the
+     wedge you are already on flips its spelling.                          */
+  var CIRCLE = [
+    {maj:["C"],            min:["A"]},
+    {maj:["G"],            min:["E"]},
+    {maj:["D"],            min:["B"]},
+    {maj:["A"],            min:["F♯"]},
+    {maj:["E"],            min:["C♯"]},
+    {maj:["B"],            min:["G♯"]},
+    {maj:["F♯","G♭"], min:["D♯","E♭"]},
+    {maj:["D♭"],           min:["B♭"]},
+    {maj:["A♭"],           min:["F"]},
+    {maj:["E♭"],           min:["C"]},
+    {maj:["B♭"],           min:["G"]},
+    {maj:["F"],            min:["D"]}
+  ];
+  var CX = 160, CY = 160;
+
+  function polar(r, deg){
+    var a = deg * Math.PI / 180;
+    return [CX + r * Math.sin(a), CY - r * Math.cos(a)];
+  }
+  function wedge(rOut, rIn, i){
+    var a0 = i*30 - 15, a1 = i*30 + 15;
+    return "M" + polar(rOut,a0) + "A" + rOut + "," + rOut + " 0 0 1 " + polar(rOut,a1) +
+           "L" + polar(rIn,a1) + "A" + rIn + "," + rIn + " 0 0 0 " + polar(rIn,a0) + "Z";
+  }
+  function circlePos(){
+    for (var i = 0; i < CIRCLE.length; i++)
+      if (CIRCLE[i][state.mode === "major" ? "maj" : "min"].indexOf(state.tonic) > -1) return i;
+    return 0;
+  }
+  function chooseKey(mode, names){
+    var at = names.indexOf(state.tonic);
+    if (state.mode === mode && at > -1 && names.length > 1) state.tonic = names[(at + 1) % names.length];
+    else { state.mode = mode; state.tonic = names[0]; }
+    drawSetup();
+  }
+  function accOf(mode, name){
+    var list = KEYS[mode], i;
+    for (i = 0; i < list.length; i++) if (list[i][0] === name) return list[i][1];
+    return 0;
+  }
+  function drawCircle(){
+    circle.innerHTML = "";
+    var here = circlePos();
+    var svgC = el("svg",{viewBox:"0 0 320 320", "class":"circle", role:"group",
+                         "aria-label":"Circle of fifths — choose a key"});
+    CIRCLE.forEach(function(pos, i){
+      [["major",150,108,pos.maj,15,""],["minor",104,64,pos.min,12.5,"m"]].forEach(function(ring){
+        var mode = ring[0], names = ring[3];
+        var name = names.indexOf(state.tonic) > -1 ? state.tonic : names[0];
+        var sel = state.mode === mode && names.indexOf(state.tonic) > -1;
+        var acc = accOf(mode, name), mid = (ring[1] + ring[2]) / 2;
+        var g = el("g",{ "class":"sector" + (sel ? " sel" : (i === here ? " rel" : "")),
+                         tabindex:0, role:"button", "aria-pressed":String(sel),
+                         "aria-label":name + " " + mode + ", " + sigCount(acc) });
+        g.appendChild(el("path",{d:wedge(ring[1], ring[2], i)}));
+        /* names and counts stack in screen space, not along the radius, so
+           they never crowd each other on the wedges out at the sides */
+        var lp = polar(mid, i*30);
+        function text(str, dy, size, cls){
+          var t = el("text",{x:lp[0], y:lp[1] + dy, "text-anchor":"middle", "font-size":size,
+                             "font-family":cls ? "IBM Plex Sans, sans-serif" : "Spectral, Georgia, serif"});
+          if (cls) t.setAttribute("class", cls);
+          t.textContent = str;
+          g.appendChild(t);
+        }
+        if (names.length > 1){                       /* the enharmonic wedge */
+          text(names[0] + ring[5], -4, ring[4] - 2.5);
+          text(names[1] + ring[5], 11, ring[4] - 2.5);
+        } else {
+          text(name + ring[5], mode === "major" ? -1 : 4, ring[4]);
+          if (mode === "major")
+            text(acc === 0 ? "—" : Math.abs(acc) + (acc > 0 ? "♯" : "♭"), 13, 9, "count");
+        }
+        g.addEventListener("click", function(){ chooseKey(mode, names); });
+        g.addEventListener("keydown", function(e){
+          if (e.key === "Enter" || e.key === " "){ e.preventDefault(); chooseKey(mode, names); }
+        });
+        svgC.appendChild(g);
+      });
     });
+    /* hub: whatever is selected, spelled out */
+    svgC.appendChild(el("circle",{cx:CX, cy:CY, r:60, fill:"var(--surface)", stroke:"var(--line)"}));
+    [[keyName(), 153, 18, "Spectral, Georgia, serif", "var(--ink)"],
+     [sigCount(keyAcc()), 172, 10.5, "IBM Plex Sans, sans-serif", "var(--ink-soft)"],
+     [sigList(keyAcc()), 186, 10.5, "IBM Plex Sans, sans-serif", "var(--ink-soft)"]
+    ].forEach(function(row){
+      var t = el("text",{x:CX, y:row[1], "text-anchor":"middle", "font-size":row[2],
+                         "font-family":row[3], fill:row[4]});
+      t.textContent = row[0];
+      svgC.appendChild(t);
+    });
+    circle.appendChild(svgC);
   }
   function drawNumerals(){
     numerals.innerHTML = "";
@@ -830,24 +927,21 @@
     /* keep the tonic legal when the mode flips */
     var names = KEYS[state.mode].map(function(k){ return k[0]; });
     if (names.indexOf(state.tonic) === -1) state.tonic = state.mode === "major" ? "C" : "A";
-    drawTonics(); drawNumerals(); drawSeq(); drawPresets();
+    drawCircle(); drawNumerals(); drawSeq(); drawPresets();
     var progline = document.getElementById("progline");
     progline.hidden = state.mode !== "minor";
     progline.innerHTML = "<b>V</b> and <b>vii\u00B0</b> raise the leading tone; the rest stay diatonic to the natural minor scale.";
-    keyline.innerHTML = "<b>" + keyName() + "</b> — " + sigText() + ". Scale: " + scaleText() + ".";
+    var rel = CIRCLE[circlePos()][state.mode === "major" ? "min" : "maj"][0] +
+              (state.mode === "major" ? " minor" : " major");
+    keyline.innerHTML = "Scale: <b>" + scaleText() + "</b> · Relative " + rel +
+      (CIRCLE[circlePos()].maj.length > 1 ? " · Click the same wedge again for the other spelling." : "");
     begin.disabled = state.chords.length < 2;
     startnote.textContent = state.chords.length < 2
       ? "Pick at least two chords."
       : state.chords.length + " chords — " + state.chords.map(numeralOf).join(" – ") +
         " in " + keyName() + ".";
-    Array.prototype.forEach.call(document.querySelectorAll("#modes button"), function(b){
-      b.classList.toggle("on", b.dataset.mode === state.mode);
-    });
   }
 
-  Array.prototype.forEach.call(document.querySelectorAll("#modes button"), function(b){
-    b.addEventListener("click", function(){ state.mode = b.dataset.mode; drawSetup(); });
-  });
   document.getElementById("undo").addEventListener("click", function(){ state.chords.pop(); drawSetup(); });
   document.getElementById("clearprog").addEventListener("click", function(){ state.chords = []; drawSetup(); });
 
