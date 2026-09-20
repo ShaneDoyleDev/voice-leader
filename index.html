@@ -20,19 +20,20 @@
     --chip:#F1F2F5;
     --accent-faint:rgba(169,112,26,.06);
     --wrong:#B32D23;
+    --good:#2C6E4F;
     color-scheme:light;
   }
   @media (prefers-color-scheme: dark){
     :root:not([data-theme="light"]){
       --bg:#12141A; --surface:#1B1E25; --ink:#EAE7DF; --ink-soft:#A2A7B4;
       --rule:#8B93A4; --accent:#E0AA4C; --accent-soft:rgba(224,170,76,.16);
-      --line:#2A2E38; --chip:#232730; --accent-faint:rgba(224,170,76,.07); --wrong:#F08579; color-scheme:dark;
+      --line:#2A2E38; --chip:#232730; --accent-faint:rgba(224,170,76,.07); --wrong:#F08579; --good:#7CC79E; color-scheme:dark;
     }
   }
   :root[data-theme="dark"]{
     --bg:#12141A; --surface:#1B1E25; --ink:#EAE7DF; --ink-soft:#A2A7B4;
     --rule:#8B93A4; --accent:#E0AA4C; --accent-soft:rgba(224,170,76,.16);
-    --line:#2A2E38; --chip:#232730; --accent-faint:rgba(224,170,76,.07); --wrong:#F08579; color-scheme:dark;
+    --line:#2A2E38; --chip:#232730; --accent-faint:rgba(224,170,76,.07); --wrong:#F08579; --good:#7CC79E; color-scheme:dark;
   }
 
   *{box-sizing:border-box}
@@ -182,6 +183,43 @@
   }
   .toolbar .spacer{flex:1 1 auto}
 
+  .checkbar{
+    display:flex; flex-wrap:wrap; align-items:center; gap:12px;
+    padding:12px 14px; border-top:1px solid var(--line);
+  }
+  .checkbar p{margin:0;font-size:13px;color:var(--ink-soft)}
+  .checkbar button{
+    background:var(--ink); color:var(--surface); border-color:var(--ink);
+    font-size:14px; padding:10px 18px;
+  }
+
+  .results{display:flex;flex-direction:column;gap:14px}
+  .results h2{
+    margin:0; font-size:11px; font-weight:600; letter-spacing:.16em;
+    text-transform:uppercase; color:var(--ink-soft);
+  }
+  .verdict{margin:0;font-family:"Spectral",Georgia,serif;font-size:19px;color:var(--ink)}
+  .findings{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px}
+  .block{display:grid;grid-template-columns:auto 1fr;gap:2px 14px;align-items:baseline}
+  .block > b{
+    font-family:"Spectral",Georgia,serif; font-size:17px;
+    color:var(--ink); letter-spacing:.04em; white-space:nowrap;
+  }
+  .block > b small{
+    display:block; font:400 10px/1.4 "IBM Plex Sans",sans-serif;
+    color:var(--ink-soft); letter-spacing:.02em;
+  }
+  .block ul{grid-column:2;list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:5px}
+  .block li{position:relative;padding-left:17px;font-size:13.5px;color:var(--ink-soft);max-width:70ch}
+  .block li::before{
+    content:""; position:absolute; left:0; top:.42em;
+    width:7px; height:7px; border-radius:50%;
+  }
+  .block li.error{color:var(--ink)}
+  .block li.error::before{background:var(--wrong)}
+  .block li.caution::before{background:var(--accent)}
+  .block li.ok::before{background:var(--good)}
+
   .readout{display:flex;flex-direction:column;gap:10px}
   .readout h2{
     margin:0; font-size:11px; font-weight:600; letter-spacing:.16em;
@@ -257,7 +295,17 @@
         <span class="spacer"></span>
         <button type="button" id="btn-clear" class="ghost">Clear notes</button>
       </div>
+      <div class="checkbar">
+        <button type="button" id="check" hidden>Check voice leading</button>
+        <p id="checkhint"></p>
+      </div>
     </div>
+
+    <section class="results" id="results" style="margin-top:20px" hidden>
+      <h2>Checklist</h2>
+      <p class="verdict" id="verdict"></p>
+      <ul class="findings" id="findings"></ul>
+    </section>
 
     <div class="readout" style="margin-top:20px">
       <h2>On the staff</h2>
@@ -709,9 +757,23 @@
     }
     drawLabels();
     renderChips();
+    if (report && reportKey !== notesKey()) report = null;   /* edited since — stale */
+    renderReport();
+    var ready = allVoiced();
+    checkBtn.hidden = !ready;
+    checkHint.textContent = ready
+      ? "Completeness, doubling, spacing, the leading tone and parallels."
+      : "Give every chord four voices to run the checklist.";
   }
 
   var chips = document.getElementById("chips");
+  var checkBtn = document.getElementById("check"), checkHint = document.getElementById("checkhint");
+  checkBtn.addEventListener("click", function(){
+    report = runChecks();
+    reportKey = notesKey();
+    renderReport();
+    document.getElementById("results").scrollIntoView({block:"nearest", behavior:"smooth"});
+  });
   function renderChips(){
     chips.innerHTML = "";
     var bySlot = {}, any = false;
@@ -735,6 +797,181 @@
       li.appendChild(b); li.appendChild(s);
       chips.appendChild(li);
     });
+  }
+
+  /* ---------- the checklist ----------------------------------------------
+     The rules are written for four named voices, but a placed note carries
+     no voice, so each chord's notes are read bottom up as Bass, Tenor, Alto,
+     Soprano. That assumes the voices do not cross, which is the same
+     assumption the spacing and parallel rules are stated under. */
+  var VOICES = ["Bass", "Tenor", "Alto", "Soprano"];
+  var ROLES = ["root", "third", "fifth"];
+
+  function voicesOf(slot){
+    return state.notes.filter(function(n){ return n.slot === slot; })
+      .map(function(n){
+        return { step:n.step, letter:n.step % 7,
+                 midi:midiAt(slot, n.step), name:nameAt(slot, n.step) };
+      })
+      .sort(function(a, b){ return a.midi - b.midi; });
+  }
+  function allVoiced(){
+    if (!state.chords.length) return false;
+    for (var i = 0; i < state.chords.length; i++) if (slotCount(i) !== MAX_VOICES) return false;
+    return true;
+  }
+
+  function runChecks(){
+    var report = { blocks:[], errors:0, cautions:0 };
+    function block(label, sub){
+      var b = { label:label, sub:sub || "", items:[] };
+      report.blocks.push(b);
+      return function(level, text){
+        b.items.push({ level:level, text:text });
+        if (level === "error") report.errors++;
+        else if (level === "caution") report.cautions++;
+      };
+    }
+
+    state.chords.forEach(function(degree, slot){
+      var v = voicesOf(slot), tones = chordLetters(degree), counts = {};
+      var add = block(numeralOf(degree), spell(degree));
+      v.forEach(function(n){ counts[n.letter] = (counts[n.letter] || 0) + 1; });
+
+      /* completeness */
+      tones.forEach(function(l, idx){
+        if (!counts[l])
+          add("error", "Missing its " + ROLES[idx] + ", " + letterText(degree, l) + ".");
+      });
+
+      /* doubling, and the third as the weaker double */
+      tones.forEach(function(l, idx){
+        if (!(counts[l] > 1)) return;
+        var what = (counts[l] > 2 ? "Three copies of the " : "Doubles the ") +
+                   ROLES[idx] + ", " + letterText(degree, l);
+        if (idx === 1) add("caution", what + " \u2014 the weaker double; the root or the fifth is the safer choice.");
+        else add("ok", what + ".");
+      });
+
+      /* the leading tone doubled in a dominant */
+      if (degree === 5 && counts[leadingLetter()] > 1)
+        add("caution", "The leading tone " + letterText(degree, leadingLetter()) +
+            " is doubled \u2014 watch it on the next move: one copy still has to rise.");
+
+      /* spacing: the two upper gaps only */
+      if (v.length === MAX_VOICES){
+        [[3, 2], [2, 1]].forEach(function(pair){
+          var gap = v[pair[0]].midi - v[pair[1]].midi;
+          if (gap > 12)
+            add("error", VOICES[pair[0]] + " and " + VOICES[pair[1]] + " are " + gap +
+                " semitones apart (" + v[pair[1]].name + " to " + v[pair[0]].name +
+                ") \u2014 keep adjacent upper voices within an octave.");
+        });
+      }
+    });
+
+    /* what happens between one chord and the next */
+    for (var i = 0; i + 1 < state.chords.length; i++){
+      var a = voicesOf(i), b = voicesOf(i + 1);
+      var add = block(numeralOf(state.chords[i]) + " \u2192 " + numeralOf(state.chords[i + 1]));
+      if (a.length !== MAX_VOICES || b.length !== MAX_VOICES) continue;
+
+      /* parallel fifths and octaves across all six pairs. Only the same
+         perfect interval twice over, both voices moving the same way:
+         contrary and oblique motion into one is left alone, and so are
+         hidden fifths and octaves. */
+      for (var lo = 0; lo < 4; lo++){
+        for (var hi = lo + 1; hi < 4; hi++){
+          var before = (a[hi].midi - a[lo].midi) % 12, after = (b[hi].midi - b[lo].midi) % 12;
+          if (before !== after || (before !== 0 && before !== 7)) continue;
+          var dLo = Math.sign(b[lo].midi - a[lo].midi), dHi = Math.sign(b[hi].midi - a[hi].midi);
+          if (dLo === 0 || dLo !== dHi) continue;
+          add("error", "Parallel " + (before === 7 ? "fifths" : "octaves") + ": " +
+              VOICES[lo] + " and " + VOICES[hi] + " move " + a[lo].name + "\u2013" + a[hi].name +
+              " to " + b[lo].name + "\u2013" + b[hi].name + ".");
+        }
+      }
+
+      /* the leading tone, whenever a dominant goes to the tonic */
+      if (state.chords[i] === 5 && state.chords[i + 1] === 1){
+        var lt = leadingLetter(), tonic = tonicLetter(), fifth = chordLetters(1)[2];
+        var carriers = [];
+        a.forEach(function(n, idx){ if (n.letter === lt) carriers.push(idx); });
+        var rises = function(idx){
+          return b[idx].step === a[idx].step + 1 && b[idx].letter === tonic;
+        };
+        var dropsToFifth = function(idx){
+          return b[idx].letter === fifth && b[idx].step < a[idx].step;
+        };
+        var risers = carriers.filter(rises);
+        if (carriers.length === 1 && !risers.length){
+          add("error", "The leading tone (" + a[carriers[0]].name + ", " + VOICES[carriers[0]] +
+              ") has to rise to the tonic; it goes to " + b[carriers[0]].name + ".");
+        } else if (carriers.length > 1){
+          if (!risers.length){
+            add("error", "The leading tone is doubled and neither copy rises to the tonic \u2014 one of them must.");
+          } else {
+            carriers.forEach(function(idx){
+              if (rises(idx) || dropsToFifth(idx)) return;
+              add("error", "The second leading tone (" + a[idx].name + ", " + VOICES[idx] +
+                  ") goes to " + b[idx].name + " \u2014 with one copy rising, the other must rise too or " +
+                  "drop to the fifth of the tonic, " + letterText(1, fifth) + ".");
+            });
+          }
+        }
+      }
+    }
+    return report;
+  }
+
+  /* ---------- reporting it ------------------------------------------------ */
+  var report = null, reportKey = "";
+  function notesKey(){
+    return state.notes.map(function(n){ return n.slot + ":" + n.step; }).sort().join(",") +
+           "|" + state.chords.join("") + "|" + state.tonic + state.mode;
+  }
+  function renderReport(){
+    var box = document.getElementById("results");
+    if (!report){ box.hidden = true; return; }
+    box.hidden = false;
+    var verdict = document.getElementById("verdict");
+    if (!report.errors && !report.cautions) verdict.textContent = "All clear.";
+    else {
+      var parts = [];
+      if (report.errors) parts.push(report.errors + (report.errors === 1 ? " thing to fix" : " things to fix"));
+      if (report.cautions) parts.push(report.cautions + " to watch");
+      verdict.textContent = parts.join(", ") + ".";
+    }
+    var list = document.getElementById("findings");
+    list.innerHTML = "";
+    report.blocks.forEach(function(b){
+      if (!b.items.length) return;
+      var li = document.createElement("li");
+      li.className = "block";
+      var label = document.createElement("b");
+      label.textContent = b.label;
+      if (b.sub){
+        var sub = document.createElement("small");
+        sub.textContent = b.sub;
+        label.appendChild(sub);
+      }
+      var ul = document.createElement("ul");
+      b.items.forEach(function(item){
+        var row = document.createElement("li");
+        row.className = item.level;
+        row.textContent = item.text;
+        ul.appendChild(row);
+      });
+      li.appendChild(label); li.appendChild(ul);
+      list.appendChild(li);
+    });
+    if (!list.children.length){
+      var li2 = document.createElement("li");
+      li2.className = "block";
+      li2.innerHTML = "<b>\u2713</b><ul><li class=\"ok\">Every chord complete, spacing within an octave, " +
+                      "no parallels and every leading tone resolved.</li></ul>";
+      list.appendChild(li2);
+    }
   }
 
   /* ---------- sound ------------------------------------------------------

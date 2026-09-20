@@ -12,22 +12,25 @@ An interactive SATB (soprano/alto/tenor/bass) voice-leading trainer. Pick a key 
 - **Four voices to a chord.** Each chord takes at most four notes, SATB. Once it has them the ghost preview stops offering a fifth and the column says so, and a note dragged in from elsewhere is turned away.
 - **Place notes directly on the staff.** Hover near the correct system and a faded preview snaps to the nearest line or space; click to drop it in. Drag a placed note to move it — to another pitch or another chord — and double-click it to take it off. The cursor turns to a hand over a note so you can see what is draggable.
 - **Real notation.** Engraved treble and bass clefs and the correct key signature for whichever key you picked. The half of the system you are hovering decides the staff: the treble covers C4 up to C6, the bass E2 up to C4, so between them every SATB pitch has a home and none of them piles up ledger lines. Middle C belongs to both — written below the treble staff or above the bass, at its own height in each, the way a widely spaced grand staff actually reads.
-- **Full checklist, every chord:**
-  - All three chord tones present, and what's doubled
-  - Spacing between adjacent voices (nothing wider than an octave)
-  - Leading-tone resolution — including the doubled-leading-tone exception (one copy resolves up, the other drops to the fifth)
-  - True parallel fifths and octaves against the previous chord, checked across all six voice pairs
-- **Parallel motion, visualized.** If a chord introduces a parallel fifth or octave, red animated lines draw themselves across the staff tracing exactly which two voices moved in lockstep.
+- **The checklist.** Once every chord has its four voices, a **Check voice leading** button appears. Each chord's notes are read bottom up as Bass, Tenor, Alto and Soprano — the rules assume the voices do not cross — and the report marks what to fix in red, what to watch in amber, and what is merely worth noting in green:
+  - **Completeness** — root, third and fifth must all be present somewhere in the four voices; anything missing is an error.
+  - **Doubling** — reports which tone is doubled. Doubling the third is flagged as the weaker choice rather than an error; the root or fifth is preferred.
+  - **Spacing** — Soprano–Alto and Alto–Tenor each stay within an octave. Tenor–Bass has no limit.
+  - **Leading-tone doubling** — a doubled leading tone in a V is a caution to watch on the next move.
+  - **Leading-tone resolution**, whenever a V moves to the tonic: undoubled, it must rise by step; doubled, at least one copy must rise and the other must either rise too or drop by leap to the fifth of the tonic — the recognised exception.
+  - **Parallel fifths and octaves** against the previous chord, across all six voice pairs. Flagged only when the same perfect interval appears in both chords *and* both voices moved the same way. Contrary and oblique motion into a repeated perfect interval are left alone, and so are hidden (direct) fifths and octaves.
 
 ## How to use it
 
-1. Pick a tonic and major/minor.
-2. Tap the chord chips to build your progression, then **Begin voicing**.
+1. Pick the key from the circle of fifths — majors outside, relative minors inside.
+2. Tap the Roman numerals to build your progression, then **Begin voicing**.
 3. For each chord, place its notes: hover and click to add, drag to move, double-click to remove.
-4. **Confirm chord** to run the checklist. Fix and re-check, or move on to the next chord.
+4. With all four voices in every chord, hit **Check voice leading**. Fix what it flags and check again — editing any note clears the last report.
 5. At the end, start a new progression to try another key or shape.
 
 ## Scope
+
+The checklist reports in prose; the animated lines across the staff tracing a parallel are not built yet.
 
 Root-position triads only. All seven diatonic degrees are available; in minor, V and vii° raise the leading tone and the rest stay diatonic to the natural minor scale. No inversions or seventh chords yet.
 
