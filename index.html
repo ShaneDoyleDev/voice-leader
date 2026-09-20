@@ -168,7 +168,11 @@
   }
   .stagehead .spacer{flex:1 1 auto}
 
-  .staffwrap{display:block;padding:6px 4px 2px;cursor:crosshair;touch-action:none;outline:none}
+  .staffwrap{
+    display:block; padding:6px 4px 2px; cursor:crosshair;
+    touch-action:none; outline:none;
+    user-select:none; -webkit-user-select:none;   /* a double click removes, never selects */
+  }
   .staffwrap:focus-visible{box-shadow:inset 0 0 0 2px var(--accent)}
   svg{display:block;width:100%;height:auto}
   .toolbar{
