@@ -1,0 +1,620 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Grand Staff Sketchpad</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Spectral:ital,wght@0,500;0,600;1,500&display=swap">
+<style>
+  :root{
+    --bg:#EBEDF1;
+    --surface:#FDFDFB;
+    --ink:#1B2130;
+    --ink-soft:#5B6274;
+    --rule:#78808F;
+    --accent:#A9701A;
+    --accent-soft:rgba(169,112,26,.13);
+    --line:#D8DBE2;
+    --chip:#F1F2F5;
+    color-scheme:light;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#12141A;
+      --surface:#1B1E25;
+      --ink:#EAE7DF;
+      --ink-soft:#A2A7B4;
+      --rule:#8B93A4;
+      --accent:#E0AA4C;
+      --accent-soft:rgba(224,170,76,.16);
+      --line:#2A2E38;
+      --chip:#232730;
+      color-scheme:dark;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#12141A;
+    --surface:#1B1E25;
+    --ink:#EAE7DF;
+    --ink-soft:#A2A7B4;
+    --rule:#8B93A4;
+    --accent:#E0AA4C;
+    --accent-soft:rgba(224,170,76,.16);
+    --line:#2A2E38;
+    --chip:#232730;
+    color-scheme:dark;
+  }
+
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font:400 15px/1.55 "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  img{max-width:100%}
+  [hidden]{display:none!important}
+
+  .wrap{
+    max-width:880px;
+    margin:0 auto;
+    padding:16px;
+    padding-block:clamp(20px,5vw,44px);
+    display:flex;
+    flex-direction:column;
+    gap:20px;
+  }
+
+  .eyebrow{
+    margin:0 0 6px;
+    font-size:11px;
+    font-weight:600;
+    letter-spacing:.16em;
+    text-transform:uppercase;
+    color:var(--accent);
+  }
+  h1{
+    margin:0;
+    font-family:"Spectral", Georgia, serif;
+    font-weight:600;
+    font-size:clamp(28px,5vw,40px);
+    letter-spacing:-.01em;
+    text-wrap:balance;
+  }
+  .lede{
+    margin:10px 0 0;
+    max-width:58ch;
+    color:var(--ink-soft);
+  }
+
+  .board{
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-radius:4px;
+    overflow:hidden;
+  }
+  .staffwrap{
+    display:block;
+    padding:6px 4px 2px;
+    cursor:crosshair;
+    touch-action:none;
+    outline:none;
+  }
+  .staffwrap:focus-visible{
+    box-shadow:inset 0 0 0 2px var(--accent);
+  }
+  svg{display:block;width:100%;height:auto}
+
+  .toolbar{
+    display:flex;
+    flex-wrap:wrap;
+    align-items:center;
+    gap:8px;
+    padding:12px 14px;
+    border-top:1px solid var(--line);
+  }
+  .toolbar .spacer{flex:1 1 auto}
+  button{
+    font:500 13px/1 "IBM Plex Sans", sans-serif;
+    color:var(--ink);
+    background:var(--chip);
+    border:1px solid var(--line);
+    border-radius:3px;
+    padding:8px 12px;
+    cursor:pointer;
+  }
+  button:hover{border-color:var(--rule)}
+  button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  button[aria-pressed="true"]{
+    background:var(--accent-soft);
+    border-color:var(--accent);
+    color:var(--ink);
+  }
+  button.ghost{background:transparent}
+
+  .readout{
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+  }
+  .readout h2{
+    margin:0;
+    font-size:11px;
+    font-weight:600;
+    letter-spacing:.16em;
+    text-transform:uppercase;
+    color:var(--ink-soft);
+  }
+  .chips{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+    margin:0;
+    padding:0;
+    list-style:none;
+  }
+  .chip{
+    display:flex;
+    align-items:baseline;
+    gap:8px;
+    padding:6px 10px;
+    background:var(--chip);
+    border-radius:3px;
+    font-variant-numeric:tabular-nums;
+  }
+  .chip b{
+    font:600 11px/1 "IBM Plex Sans", sans-serif;
+    color:var(--accent);
+  }
+  .chip span{
+    font-family:"Spectral", Georgia, serif;
+    font-size:15px;
+    letter-spacing:.02em;
+  }
+  .empty{margin:0;color:var(--ink-soft);font-style:italic}
+  .hint{
+    margin:0;
+    font-size:13px;
+    color:var(--ink-soft);
+  }
+  kbd{
+    font:500 11px/1 "IBM Plex Sans", sans-serif;
+    border:1px solid var(--line);
+    border-bottom-width:2px;
+    border-radius:3px;
+    padding:2px 5px;
+    background:var(--chip);
+  }
+  @media (prefers-reduced-motion: no-preference){
+    #ghost{transition:opacity .12s ease}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <p class="eyebrow">Voice Leader</p>
+    <h1>Grand Staff Sketchpad</h1>
+    <p class="lede">Move over either staff and a faded note snaps to the nearest line or space. Click to place it, drag it to another pitch, or click it again to take it off. Ledger lines appear on whichever staff keeps them fewest.</p>
+  </header>
+
+  <section class="board">
+    <div class="staffwrap" id="staffwrap" tabindex="0" role="application"
+         aria-label="Grand staff. Arrow keys move the cursor, Enter places or removes a note.">
+      <svg id="staff" viewBox="0 0 640 252" aria-hidden="true"></svg>
+    </div>
+    <div class="toolbar">
+      <button type="button" id="btn-names" aria-pressed="false">Note names</button>
+      <button type="button" id="btn-sound" aria-pressed="true">Sound</button>
+      <span class="spacer"></span>
+      <button type="button" id="btn-clear" class="ghost">Clear staff</button>
+    </div>
+  </section>
+
+  <section class="readout">
+    <h2>On the staff</h2>
+    <ul class="chips" id="chips" aria-live="polite"></ul>
+    <p class="hint">Keyboard: <kbd>Tab</kbd> to the staff, <kbd>←</kbd> <kbd>→</kbd> for position, <kbd>↑</kbd> <kbd>↓</kbd> for pitch, <kbd>Enter</kbd> to place or remove.</p>
+  </section>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ---------- geometry -------------------------------------------------
+     A pitch is one diatonic step: step = octave * 7 + letterIndex (C=0).
+     Middle C is step 28. One step is half a staff space.                */
+  var S = 12, HALF = S / 2;
+  var TOP_STEP = 38, Y_TOP = 60;          // F5 sits on the top treble line
+  var STAFF_L = 30, STAFF_R = 612;
+  var X0 = 120, DX = 64, SLOTS = 8;
+  var MIN_STEP = 12, MAX_STEP = 44;        // A1 up to E6 — three ledgers either way
+  var LETTERS = ["C","D","E","F","G","A","B"];
+  var SEMIS   = [0,2,4,5,7,9,11];
+  var STAVES = { treble:{ top:38, bottom:30, mid:34 }, bass:{ top:26, bottom:18, mid:22 } };
+
+  function yOf(step){ return Y_TOP + (TOP_STEP - step) * HALF; }
+  function xOf(slot){ return X0 + slot * DX; }
+  function stepAt(y){ return clamp(Math.round(TOP_STEP - (y - Y_TOP) / HALF), MIN_STEP, MAX_STEP); }
+  function slotAt(x){ return clamp(Math.round((x - X0) / DX), 0, SLOTS - 1); }
+  function clamp(v,a,b){ return v < a ? a : v > b ? b : v; }
+  function nameOf(step){ return LETTERS[step % 7] + Math.floor(step / 7); }
+  function freqOf(step){
+    var midi = (Math.floor(step / 7) + 1) * 12 + SEMIS[step % 7];
+    return 440 * Math.pow(2, (midi - 69) / 12);
+  }
+  function ledgerCount(staff, step){
+    var s = STAVES[staff];
+    if (step > s.top) return Math.floor((step - s.top) / 2);
+    if (step < s.bottom) return Math.floor((s.bottom - step) / 2);
+    return 0;
+  }
+  /* Put the note on whichever staff needs fewer ledger lines; a tie goes
+     to the half of the system the pointer is actually in.              */
+  function pickStaff(step, preferred){
+    var t = ledgerCount("treble", step), b = ledgerCount("bass", step);
+    return t < b ? "treble" : b < t ? "bass" : preferred;
+  }
+
+  /* ---------- calligraphic strokes -------------------------------------
+     Clefs and the brace are drawn as filled outlines around a sampled
+     spine, so the stroke can swell and taper the way a nib does.       */
+  function cubic(p0,p1,p2,p3,n){
+    var out = [];
+    for (var i = 0; i <= n; i++){
+      var t = i / n, u = 1 - t;
+      out.push([
+        u*u*u*p0[0] + 3*u*u*t*p1[0] + 3*u*t*t*p2[0] + t*t*t*p3[0],
+        u*u*u*p0[1] + 3*u*u*t*p1[1] + 3*u*t*t*p2[1] + t*t*t*p3[1]
+      ]);
+    }
+    return out;
+  }
+  function widthFn(keys){
+    return function(t){
+      for (var i = 1; i < keys.length; i++){
+        if (t <= keys[i][0]){
+          var a = keys[i-1], b = keys[i];
+          var f = (t - a[0]) / (b[0] - a[0] || 1);
+          return a[1] + (b[1] - a[1]) * f;
+        }
+      }
+      return keys[keys.length-1][1];
+    };
+  }
+  function ribbon(pts, w){
+    var left = [], right = [], n = pts.length;
+    for (var i = 0; i < n; i++){
+      var p = pts[i], a = pts[Math.max(0,i-1)], b = pts[Math.min(n-1,i+1)];
+      var tx = b[0]-a[0], ty = b[1]-a[1], len = Math.hypot(tx,ty) || 1;
+      var nx = -ty/len, ny = tx/len, h = w(i/(n-1)) / 2;
+      left.push([p[0]+nx*h, p[1]+ny*h]);
+      right.push([p[0]-nx*h, p[1]-ny*h]);
+    }
+    var d = "M" + left.map(function(p){ return p[0].toFixed(3)+","+p[1].toFixed(3); }).join("L");
+    d += "L" + right.reverse().map(function(p){ return p[0].toFixed(3)+","+p[1].toFixed(3); }).join("L") + "Z";
+    return d;
+  }
+
+  function trebleClefD(){
+    var spine = cubic([-0.55,-2.35],[-0.55,-3.20],[0.50,-3.25],[0.58,-2.45],24)
+      .concat(cubic([0.58,-2.45],[0.66,-1.55],[0.25,-0.20],[0.05,0.80],26).slice(1))
+      .concat(cubic([0.05,0.80],[-0.08,1.80],[-0.20,2.80],[-0.27,3.50],20).slice(1))
+      .concat(cubic([-0.27,3.50],[-0.32,4.15],[-0.92,4.35],[-1.05,3.80],16).slice(1));
+    var stem = ribbon(spine, widthFn([[0,.05],[.10,.20],[.30,.30],[.50,.34],[.72,.30],[.90,.20],[1,.05]]));
+
+    /* the bowl: one turn at full size, then it winds in to the G line */
+    var cx = 0, cy = 1, a0 = 82 * Math.PI/180, r0 = 1.46;
+    var turn = 2*Math.PI, total = turn + 1.2*2*Math.PI, curl = [];
+    for (var i = 0; i <= 170; i++){
+      var d = total * i / 170;
+      var r = d <= turn ? r0*Math.exp(-0.10*d)
+                        : r0*Math.exp(-0.10*turn)*Math.exp(-0.33*(d-turn));
+      curl.push([cx + r*Math.cos(a0+d), cy - r*Math.sin(a0+d)]);
+    }
+    var bowl = ribbon(curl, widthFn([[0,.10],[.08,.28],[.30,.38],[.50,.34],[.70,.24],[.85,.13],[1,.03]]));
+    return stem + " " + bowl;
+  }
+
+  function bassClefD(){
+    var spine = cubic([0.15,0.15],[0.15,-0.55],[0.95,-0.85],[1.35,-0.35],20)
+      .concat(cubic([1.35,-0.35],[1.75,0.15],[1.65,1.05],[1.15,1.70],22).slice(1))
+      .concat(cubic([1.15,1.70],[0.75,2.20],[0.25,2.50],[-0.40,2.70],20).slice(1));
+    return ribbon(spine, widthFn([[0,.72],[.10,.68],[.30,.46],[.55,.34],[.80,.20],[1,.03]]));
+  }
+
+  function braceD(){
+    var spine = cubic([24,56],[14,76],[21,100],[11,120],40)
+      .concat(cubic([11,120],[21,140],[14,164],[24,184],40).slice(1));
+    return ribbon(spine, widthFn([[0,.6],[.20,4.6],[.38,5.6],[.50,1.4],[.62,5.6],[.80,4.6],[1,.6]]));
+  }
+
+  /* ---------- svg helpers ---------------------------------------------- */
+  var NS = "http://www.w3.org/2000/svg";
+  function el(name, attrs){
+    var node = document.createElementNS(NS, name);
+    for (var k in attrs) node.setAttribute(k, attrs[k]);
+    return node;
+  }
+  var svg = document.getElementById("staff");
+  var layerStaff = el("g", {}), layerSlot = el("g", {}), layerNotes = el("g", {}), layerGhost = el("g", {id:"ghost"});
+  svg.appendChild(layerSlot); svg.appendChild(layerStaff); svg.appendChild(layerNotes); svg.appendChild(layerGhost);
+
+  function drawStaff(){
+    var i, y;
+    for (i = 0; i < 5; i++){
+      y = Y_TOP + i * S;
+      layerStaff.appendChild(el("line", {x1:STAFF_L, y1:y, x2:STAFF_R, y2:y, stroke:"var(--rule)", "stroke-width":1.1}));
+      y = yOf(26) + i * S;
+      layerStaff.appendChild(el("line", {x1:STAFF_L, y1:y, x2:STAFF_R, y2:y, stroke:"var(--rule)", "stroke-width":1.1}));
+    }
+    layerStaff.appendChild(el("path", {d:braceD(), fill:"var(--ink)"}));
+    layerStaff.appendChild(el("line", {x1:STAFF_L, y1:Y_TOP, x2:STAFF_L, y2:yOf(18), stroke:"var(--ink)", "stroke-width":2.4}));
+    layerStaff.appendChild(el("line", {x1:598, y1:Y_TOP, x2:598, y2:yOf(18), stroke:"var(--ink)", "stroke-width":1.2}));
+    layerStaff.appendChild(el("line", {x1:607, y1:Y_TOP, x2:607, y2:yOf(18), stroke:"var(--ink)", "stroke-width":4}));
+
+    var g1 = el("g", {transform:"translate(64," + yOf(34) + ") scale(" + S + ")"});
+    g1.appendChild(el("path", {d:trebleClefD(), fill:"var(--ink)"}));
+    layerStaff.appendChild(g1);
+
+    var g2 = el("g", {transform:"translate(44," + yOf(24) + ") scale(" + S + ")"});
+    g2.appendChild(el("path", {d:bassClefD(), fill:"var(--ink)"}));
+    g2.appendChild(el("circle", {cx:0.20, cy:0.05, r:0.42, fill:"var(--ink)"}));
+    g2.appendChild(el("circle", {cx:2.05, cy:-0.5, r:0.17, fill:"var(--ink)"}));
+    g2.appendChild(el("circle", {cx:2.05, cy:0.5,  r:0.17, fill:"var(--ink)"}));
+    layerStaff.appendChild(g2);
+  }
+
+  function noteGroup(note, opts){
+    var g = el("g", {});
+    var x = xOf(note.slot), y = yOf(note.step), color = opts.color;
+    var staffDef = STAVES[note.staff], n = ledgerCount(note.staff, note.step), i, ly;
+    for (i = 1; i <= n; i++){
+      ly = note.step > staffDef.top ? yOf(staffDef.top + i*2) : yOf(staffDef.bottom - i*2);
+      g.appendChild(el("line", {x1:x-13, y1:ly, x2:x+13, y2:ly, stroke:color, "stroke-width":1.4}));
+    }
+    g.appendChild(el("ellipse", {cx:x, cy:y, rx:8.2, ry:6, fill:color, transform:"rotate(-20 "+x+" "+y+")"}));
+    var up = note.step < staffDef.mid;
+    g.appendChild(el("line", {
+      x1: up ? x+7.4 : x-7.4, y1: up ? y-1.6 : y+1.6,
+      x2: up ? x+7.4 : x-7.4, y2: up ? y-42 : y+42,
+      stroke:color, "stroke-width":1.7, "stroke-linecap":"round"
+    }));
+    if (opts.label){
+      var t = el("text", {x:x+16, y:y+4, fill:color, "font-size":11, "font-family":"IBM Plex Sans, sans-serif", "font-weight":500});
+      t.textContent = nameOf(note.step);
+      g.appendChild(t);
+    }
+    if (opts.opacity != null) g.setAttribute("opacity", opts.opacity);
+    return g;
+  }
+
+  /* ---------- state ----------------------------------------------------- */
+  var notes = [
+    {slot:0, step:21, staff:"bass"},  {slot:0, step:30, staff:"treble"},
+    {slot:0, step:32, staff:"treble"},{slot:0, step:35, staff:"treble"},
+    {slot:1, step:18, staff:"bass"},  {slot:1, step:29, staff:"treble"},
+    {slot:1, step:32, staff:"treble"},{slot:1, step:34, staff:"treble"}
+  ];
+  var showNames = false, soundOn = true;
+  var hover = null, drag = null, cursor = {slot:2, step:30, staff:"treble"}, keyboard = false;
+
+  function indexAt(slot, step){
+    for (var i = 0; i < notes.length; i++) if (notes[i].slot === slot && notes[i].step === step) return i;
+    return -1;
+  }
+
+  function render(){
+    while (layerNotes.firstChild) layerNotes.removeChild(layerNotes.firstChild);
+    while (layerGhost.firstChild) layerGhost.removeChild(layerGhost.firstChild);
+    while (layerSlot.firstChild) layerSlot.removeChild(layerSlot.firstChild);
+
+    var focus = drag ? notes[drag.index] : (hover || (keyboard ? cursor : null));
+    if (focus){
+      layerSlot.appendChild(el("rect", {
+        x: xOf(focus.slot) - 22, y: 44, width: 44, height: 160,
+        rx: 3, fill: "var(--accent-soft)"
+      }));
+    }
+    notes.forEach(function(n, i){
+      if (drag && drag.index === i) return;
+      layerNotes.appendChild(noteGroup(n, {color:"var(--ink)", label:showNames}));
+    });
+    if (drag){
+      layerGhost.appendChild(noteGroup(notes[drag.index], {color:"var(--accent)", label:true}));
+    } else if (focus && indexAt(focus.slot, focus.step) === -1){
+      layerGhost.appendChild(noteGroup(focus, {color:"var(--accent)", label:true, opacity:0.55}));
+    }
+    renderChips();
+  }
+
+  var chips = document.getElementById("chips");
+  function renderChips(){
+    chips.innerHTML = "";
+    var bySlot = {}, any = false;
+    notes.forEach(function(n){ (bySlot[n.slot] = bySlot[n.slot] || []).push(n.step); any = true; });
+    if (!any){
+      var p = document.createElement("li");
+      p.className = "empty";
+      p.textContent = "Nothing placed yet — click a line or a space.";
+      chips.appendChild(p);
+      return;
+    }
+    Object.keys(bySlot).map(Number).sort(function(a,b){ return a-b; }).forEach(function(slot){
+      var li = document.createElement("li");
+      li.className = "chip";
+      var b = document.createElement("b");
+      b.textContent = slot + 1;
+      var s = document.createElement("span");
+      s.textContent = bySlot[slot].sort(function(a,b){ return a-b; }).map(nameOf).join("  ");
+      li.appendChild(b); li.appendChild(s);
+      chips.appendChild(li);
+    });
+  }
+
+  /* ---------- sound ------------------------------------------------------ */
+  var actx = null;
+  function play(step){
+    if (!soundOn) return;
+    try {
+      actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+      var o = actx.createOscillator(), g = actx.createGain(), t = actx.currentTime;
+      o.type = "triangle";
+      o.frequency.value = freqOf(step);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.16, t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.85);
+      o.connect(g); g.connect(actx.destination);
+      o.start(t); o.stop(t + 0.9);
+    } catch (e) { /* no audio available — placement still works */ }
+  }
+
+  /* ---------- pointer ---------------------------------------------------- */
+  function local(e){
+    var pt = svg.createSVGPoint();
+    pt.x = e.clientX; pt.y = e.clientY;
+    return pt.matrixTransform(svg.getScreenCTM().inverse());
+  }
+  function targetAt(p){
+    var step = stepAt(p.y);
+    return { slot: slotAt(p.x), step: step, staff: pickStaff(step, p.y < yOf(28) ? "treble" : "bass") };
+  }
+  function hitNote(p){
+    for (var i = 0; i < notes.length; i++){
+      if (Math.abs(p.x - xOf(notes[i].slot)) < 13 && Math.abs(p.y - yOf(notes[i].step)) < 7) return i;
+    }
+    return -1;
+  }
+
+  var wrap = document.getElementById("staffwrap");
+
+  svg.addEventListener("pointermove", function(e){
+    var p = local(e);
+    if (drag){
+      var t = targetAt(p);
+      if (t.slot !== notes[drag.index].slot || t.step !== notes[drag.index].step){
+        if (indexAt(t.slot, t.step) === -1){
+          notes[drag.index] = t;
+          drag.moved = true;
+          render();
+        }
+      }
+      return;
+    }
+    keyboard = false;
+    var t2 = targetAt(p);
+    if (!hover || hover.slot !== t2.slot || hover.step !== t2.step || hover.staff !== t2.staff){
+      hover = t2;
+      render();
+    }
+  });
+
+  svg.addEventListener("pointerleave", function(){
+    if (drag) return;
+    hover = null;
+    render();
+  });
+
+  var press = null;
+
+  svg.addEventListener("pointerdown", function(e){
+    var p = local(e), hit = hitNote(p);
+    svg.setPointerCapture(e.pointerId);
+    press = { id: e.pointerId, x: p.x, y: p.y };
+    if (hit > -1){
+      drag = { index: hit, moved: false };
+      render();
+    }
+  });
+
+  svg.addEventListener("pointercancel", function(){
+    press = null;
+    drag = null;
+    render();
+  });
+
+  svg.addEventListener("pointerup", function(e){
+    /* only a release that began with a press on the staff counts */
+    if (!press || press.id !== e.pointerId) return;
+    var p = local(e), from = press;
+    press = null;
+    if (drag){
+      var d = drag; drag = null;
+      if (d.moved) play(notes[d.index].step);
+      else notes.splice(d.index, 1);
+      hover = targetAt(p);
+      render();
+      return;
+    }
+    if (Math.hypot(p.x - from.x, p.y - from.y) > 10){  /* a drag across empty staff, not a click */
+      hover = targetAt(p);
+      render();
+      return;
+    }
+    var t = targetAt(p);
+    if (indexAt(t.slot, t.step) === -1){
+      notes.push(t);
+      play(t.step);
+    }
+    hover = t;
+    render();
+  });
+
+  /* ---------- keyboard ---------------------------------------------------- */
+  wrap.addEventListener("keydown", function(e){
+    var handled = true;
+    switch (e.key){
+      case "ArrowUp":    cursor.step = clamp(cursor.step + 1, MIN_STEP, MAX_STEP); break;
+      case "ArrowDown":  cursor.step = clamp(cursor.step - 1, MIN_STEP, MAX_STEP); break;
+      case "ArrowLeft":  cursor.slot = clamp(cursor.slot - 1, 0, SLOTS - 1); break;
+      case "ArrowRight": cursor.slot = clamp(cursor.slot + 1, 0, SLOTS - 1); break;
+      case "Enter":
+      case " ":
+        var i = indexAt(cursor.slot, cursor.step);
+        if (i > -1) notes.splice(i, 1);
+        else { notes.push({slot:cursor.slot, step:cursor.step, staff:cursor.staff}); play(cursor.step); }
+        break;
+      case "Backspace":
+      case "Delete":
+        var j = indexAt(cursor.slot, cursor.step);
+        if (j > -1) notes.splice(j, 1);
+        break;
+      default: handled = false;
+    }
+    if (!handled) return;
+    e.preventDefault();
+    cursor.staff = pickStaff(cursor.step, cursor.staff);
+    keyboard = true;
+    hover = null;
+    render();
+  });
+  wrap.addEventListener("focus", function(){ keyboard = true; render(); });
+  wrap.addEventListener("blur", function(){ keyboard = false; render(); });
+
+  /* ---------- toolbar ------------------------------------------------------ */
+  var btnNames = document.getElementById("btn-names");
+  var btnSound = document.getElementById("btn-sound");
+  btnNames.addEventListener("click", function(){
+    showNames = !showNames;
+    btnNames.setAttribute("aria-pressed", String(showNames));
+    render();
+  });
+  btnSound.addEventListener("click", function(){
+    soundOn = !soundOn;
+    btnSound.setAttribute("aria-pressed", String(soundOn));
+  });
+  document.getElementById("btn-clear").addEventListener("click", function(){
+    notes = [];
+    render();
+  });
+
+  drawStaff();
+  render();
+})();
+</script>
+</body>
+</html>
