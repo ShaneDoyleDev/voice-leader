@@ -627,7 +627,8 @@
       state.notes.forEach(function(n){
         if (n.slot === i) count[n.step % 7] = (count[n.step % 7] || 0) + 1;
       });
-      var complete = count[tones[0]] > 0 && count[tones[1]] > 0;   /* fifth optional */
+      var complete = count[tones[0]] > 0 && count[tones[1]] > 0 &&
+                     (!needsFifth(i) || count[tones[2]] > 0);   /* fifth optional, except diminished */
 
       var t = el("text",{x:SLOT_X[i], y:228, fill: complete ? "var(--accent)" : "var(--ink)",
                          "text-anchor":"middle", "font-family":"Spectral, Georgia, serif",
@@ -1022,7 +1023,9 @@
      both there. The fifth may be left out — four parts will not always hold
      three tones and a sensible doubling, and dropping the fifth is the usual
      way out. The root and the third are what name the chord, so neither can
-     go. */
+     go — and neither can the fifth of a diminished triad, which is the
+     interval the chord is named for. */
+  function needsFifth(slot){ return quality(state.chords[slot]) === "dim"; }
   function chordIsClean(slot){
     if (slot >= state.chords.length || slotCount(slot) !== MAX_VOICES) return false;
     var notes = notesIn(slot), tones = chordLetters(state.chords[slot]), seen = {}, i, letter;
@@ -1031,7 +1034,7 @@
       if (tones.indexOf(letter) === -1) return false;          /* a note outside the chord */
       seen[letter] = true;
     }
-    return !!(seen[tones[0]] && seen[tones[1]]);               /* root and third */
+    return !!(seen[tones[0]] && seen[tones[1]] && (!needsFifth(slot) || seen[tones[2]]));
   }
   function firstChordVoices(){
     return chordIsClean(0) ? voicesOf(0) : null;               /* bass first */
@@ -1177,6 +1180,9 @@
         if (counts[l]) return;
         if (idx < 2){
           add("error", "Missing its " + ROLES[idx] + ", " + letterText(degree, l) + ".");
+        } else if (needsFifth(slot)){
+          add("error", "Missing its fifth, " + letterText(degree, l) +
+              " \u2014 a diminished triad cannot do without it; the diminished fifth is what makes it one.");
         } else if (counts[tones[0]] > 2){
           add("ok", "No fifth, root tripled \u2014 the usual way to leave it out.");
         } else {
