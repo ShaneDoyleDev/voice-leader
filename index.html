@@ -192,6 +192,8 @@
     background:var(--ink); color:var(--surface); border-color:var(--ink);
     font-size:14px; padding:10px 18px;
   }
+  .checkbar button.secondary{background:var(--chip);color:var(--ink);border-color:var(--line)}
+  .checkbar button.secondary:hover{border-color:var(--rule)}
 
   .results{display:flex;flex-direction:column;gap:14px}
   .results h2{
@@ -302,6 +304,7 @@
       </div>
       <div class="checkbar">
         <button type="button" id="check" hidden>Check voice leading</button>
+        <button type="button" id="play" class="secondary" hidden>Play progression</button>
         <p id="checkhint"></p>
       </div>
     </div>
@@ -809,6 +812,9 @@
     });
     var focus = drag ? state.notes[drag.index] : (hover || (keyboard ? cursor : null));
     if (focus) layerSlot.appendChild(el("rect",{x:SLOT_X[focus.slot]-22,y:44,width:44,height:172,rx:3,fill:"var(--accent-soft)"}));
+    if (playingSlot != null && SLOT_X[playingSlot] != null)
+      layerSlot.appendChild(el("rect",{x:SLOT_X[playingSlot]-24,y:44,width:48,height:172,rx:3,
+                                       fill:"var(--accent-soft)"}));
     state.notes.forEach(function(n,i){
       if (drag && drag.index === i) return;
       layerNotes.appendChild(noteGroup(n,{
@@ -836,6 +842,8 @@
     renderReport();
     var ready = allVoiced();
     checkBtn.hidden = !ready;
+    playBtn.hidden = !ready;
+    if (!ready && playTimer) stopPlayback();
     checkHint.textContent = ready
       ? "Completeness, doubling, spacing, the leading tone and parallels."
       : "Give every chord four voices to run the checklist.";
@@ -843,6 +851,8 @@
 
   var chips = document.getElementById("chips");
   var checkBtn = document.getElementById("check"), checkHint = document.getElementById("checkhint");
+  var playBtn = document.getElementById("play");
+  playBtn.addEventListener("click", playProgression);
   checkBtn.addEventListener("click", function(){
     report = runChecks();
     reportKey = notesKey();
@@ -1247,6 +1257,36 @@
     o.start(t); o.stop(t + 0.9);
   }
 
+  /* ---------- playback ----------------------------------------------------
+     Each chord in turn, its four voices together, with the column lit while
+     it sounds. Pressing Play turns the sound on if it was off, rather than
+     playing to silence. */
+  var CHORD_MS = 1150, playTimer = null, playingSlot = null;
+  function stopPlayback(){
+    if (playTimer){ clearTimeout(playTimer); playTimer = null; }
+    playingSlot = null;
+    playBtn.textContent = "Play progression";
+    render();
+  }
+  function playProgression(){
+    if (playTimer || playingSlot != null){ stopPlayback(); return; }
+    if (!soundOn){
+      soundOn = true;
+      btnSound.setAttribute("aria-pressed", "true");
+    }
+    audio();
+    playBtn.textContent = "Stop";
+    var slot = 0;
+    (function next(){
+      if (slot >= state.chords.length){ stopPlayback(); return; }
+      playingSlot = slot;
+      notesIn(slot).forEach(function(n){ play(slot, n.step); });
+      render();
+      slot++;
+      playTimer = setTimeout(next, CHORD_MS);
+    })();
+  }
+
   /* ---------- pointer ------------------------------------------------------- */
   function local(e){
     var pt = svg.createSVGPoint();
@@ -1581,6 +1621,7 @@
     wrap.focus({preventScroll:true});
   });
   document.getElementById("edit").addEventListener("click", function(){
+    stopPlayback();
     stage.hidden = true;
     setup.hidden = false;
     drawSetup();
