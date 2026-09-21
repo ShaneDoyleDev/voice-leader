@@ -475,7 +475,7 @@
   /* horizontal position of each chord, cleared of the key signature */
   var SLOT_X = [];
   function layoutSlots(){
-    var n = state.chords.length, first = SIG_X + sigWidth(S) + 34, last = 578, xs = [], i;
+    var n = state.chords.length, first = SIG_X + sigWidth(S) + 46, last = 578, xs = [], i;
     if (n === 1) return [(first + last) / 2];
     var gap = Math.min((last - first) / (n - 1), 108);
     var start = first + ((last - first) - gap * (n - 1)) / 2;
@@ -649,6 +649,21 @@
         } catch (e) { /* no layout yet — the dot reappears on the next render */ }
       }
     });
+
+    var opening = firstChordVoices();
+    if (opening){
+      var SHORT = ["B", "T", "A", "S"], LONG = ["Bass", "Tenor", "Alto", "Soprano"];
+      opening.forEach(function(n, j){
+        var t = el("text",{x:SLOT_X[0] - 28, y:yOf(n.step, n.staff) + 3.5, "text-anchor":"end",
+                           "font-family":"IBM Plex Sans, sans-serif", "font-size":10,
+                           "font-weight":600, "letter-spacing":"0.06em", fill:"var(--ink-soft)"});
+        var title = el("title",{});
+        title.textContent = LONG[j];
+        t.appendChild(title);
+        t.appendChild(document.createTextNode(SHORT[j]));
+        layerLabels.appendChild(t);
+      });
+    }
   }
 
   /* A note pops in when it is placed: it lands a little small and eases up to
@@ -810,10 +825,24 @@
   function voicesOf(slot){
     return state.notes.filter(function(n){ return n.slot === slot; })
       .map(function(n){
-        return { step:n.step, letter:n.step % 7,
+        return { step:n.step, letter:n.step % 7, staff:n.staff,
                  midi:midiAt(slot, n.step), name:nameAt(slot, n.step) };
       })
       .sort(function(a, b){ return a.midi - b.midi; });
+  }
+  /* Once the opening chord is complete — four voices, every one of them a
+     tone of the chord, all three tones present — its notes are named top
+     down: soprano, alto, tenor, bass. Read fresh on every render, so moving
+     a note renames whatever it has become. */
+  function firstChordVoices(){
+    if (!state.chords.length || slotCount(0) !== MAX_VOICES) return null;
+    var v = voicesOf(0), tones = chordLetters(state.chords[0]), seen = {}, i;
+    for (i = 0; i < v.length; i++){
+      if (tones.indexOf(v[i].letter) === -1) return null;     /* a note outside the chord */
+      seen[v[i].letter] = true;
+    }
+    for (i = 0; i < tones.length; i++) if (!seen[tones[i]]) return null;   /* a tone missing */
+    return v;                                                 /* bass first */
   }
   function allVoiced(){
     if (!state.chords.length) return false;
