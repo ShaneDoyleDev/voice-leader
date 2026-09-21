@@ -925,7 +925,7 @@
     if (!state.notes.length && playTimer) stopPlayback();
     checkHint.textContent = ready
       ? "Completeness, doubling, spacing, the leading tone and parallels."
-      : "Give every chord four voices to run the checklist.";
+      : "Give every chord at least three notes to run the checklist.";
   }
 
   var chips = document.getElementById("chips");
@@ -1027,7 +1027,8 @@
      interval the chord is named for. */
   function needsFifth(slot){ return quality(state.chords[slot]) === "dim"; }
   function chordIsClean(slot){
-    if (slot >= state.chords.length || slotCount(slot) !== MAX_VOICES) return false;
+    var count = slotCount(slot);
+    if (slot >= state.chords.length || count < 3 || count > MAX_VOICES) return false;
     var notes = notesIn(slot), tones = chordLetters(state.chords[slot]), seen = {}, i, letter;
     for (i = 0; i < notes.length; i++){
       letter = notes[i].step % 7;
@@ -1036,8 +1037,9 @@
     }
     return !!(seen[tones[0]] && seen[tones[1]] && (!needsFifth(slot) || seen[tones[2]]));
   }
+  /* the letters name four parts, so they wait for four notes */
   function firstChordVoices(){
-    return chordIsClean(0) ? voicesOf(0) : null;               /* bass first */
+    return (chordIsClean(0) && slotCount(0) === MAX_VOICES) ? voicesOf(0) : null;
   }
   /* The opening chord fixes the voices. Every later chord's four notes are
      then matched to those same four lines by the assignment that moves them
@@ -1151,7 +1153,7 @@
   }
   function allVoiced(){
     if (!state.chords.length) return false;
-    for (var i = 0; i < state.chords.length; i++) if (slotCount(i) !== MAX_VOICES) return false;
+    for (var i = 0; i < state.chords.length; i++) if (slotCount(i) < 3) return false;
     return true;
   }
 
@@ -1204,6 +1206,9 @@
       if (degree === 5 && counts[leadingLetter()] > 1)
         add("caution", "The leading tone " + letterText(degree, leadingLetter()) +
             " is doubled \u2014 watch it on the next move: one copy still has to rise.");
+
+      if (v.length < MAX_VOICES && v.length >= 3)
+        add("ok", v.length + " voices \u2014 spacing, crossing and the parallel checks want a fourth.");
 
       /* a lower voice sounding above the one named over it */
       if (v.length === MAX_VOICES){
