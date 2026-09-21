@@ -193,8 +193,6 @@
     background:var(--ink); color:var(--surface); border-color:var(--ink);
     font-size:14px; padding:10px 18px;
   }
-  .checkbar button.secondary{background:var(--chip);color:var(--ink);border-color:var(--line)}
-  .checkbar button.secondary:hover{border-color:var(--rule)}
 
   .results{display:flex;flex-direction:column;gap:14px}
   .results h2{
@@ -305,12 +303,12 @@
       <div class="toolbar">
         <button type="button" id="btn-names" aria-pressed="false">Note names</button>
         <button type="button" id="btn-sound" aria-pressed="false">Sound</button>
+        <button type="button" id="play">Play</button>
         <span class="spacer"></span>
         <button type="button" id="btn-clear" class="ghost">Clear notes</button>
       </div>
       <div class="checkbar">
         <button type="button" id="check" hidden>Check voice leading</button>
-        <button type="button" id="play" class="secondary" hidden>Play progression</button>
         <p id="checkhint"></p>
       </div>
     </div>
@@ -911,8 +909,10 @@
     renderReport();
     var ready = allVoiced();
     checkBtn.hidden = !ready;
-    playBtn.hidden = !ready;
-    if (!ready && playTimer) stopPlayback();
+    /* Play stays up throughout, so a part-written progression can be heard;
+       an empty chord simply passes in silence */
+    playBtn.disabled = !state.notes.length;
+    if (!state.notes.length && playTimer) stopPlayback();
     checkHint.textContent = ready
       ? "Completeness, doubling, spacing, the leading tone and parallels."
       : "Give every chord four voices to run the checklist.";
@@ -1365,7 +1365,7 @@
   function stopPlayback(){
     if (playTimer){ clearTimeout(playTimer); playTimer = null; }
     playingSlot = null;
-    playBtn.textContent = "Play progression";
+    playBtn.textContent = "Play";
     render();
   }
   function playProgression(){
