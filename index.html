@@ -855,7 +855,8 @@
 
   /* ---------- staff state -------------------------------------------------- */
   var showNames = false, soundOn = false;   /* off until asked for; Play turns it on */
-  var hover = null, drag = null, press = null, cursor = null, keyboard = false, lastClick = null;
+  var hover = null, hoverNear = false, drag = null, press = null, cursor = null;
+  var keyboard = false, lastClick = null;
 
   var MAX_VOICES = 4;                      /* one chord, four voices */
   /* a placed note that is not one of the chord's three tones draws in red */
@@ -893,12 +894,16 @@
     });
     /* the preview and the note in hand follow the Note names toggle, rather
        than naming themselves whether or not it is on */
-    if (drag) layerGhost.appendChild(noteGroup(drag.note,{color:"var(--accent)",label:showNames}));
+    if (drag) layerGhost.appendChild(noteGroup(drag.note,{color:"var(--accent)",label:showNames,pop:false}));
     else if (focus && indexAt(focus.slot, focus.step) === -1 && !slotFull(focus.slot))
       layerGhost.appendChild(noteGroup(focus,{color:"var(--accent)",label:showNames,opacity:0.55,pop:false}));
 
-    /* A full chord takes no more notes; a cross over its column clears it. */
-    var cueSlot = (focus && !drag && slotFull(focus.slot)) ? focus.slot : null;
+    /* A full chord takes no more notes; a cross over its column clears it.
+       Only while the pointer is in that column, though — the nearest chord
+       is picked with no bound on distance, and a cross should not be offered
+       from the far side of the staff. */
+    var nearColumn = keyboard || hoverNear;
+    var cueSlot = (focus && !drag && nearColumn && slotFull(focus.slot)) ? focus.slot : null;
     if (cueSlot != null && SLOT_X[cueSlot] != null){
       var cue = el("text",{x:SLOT_X[cueSlot], y:55, "text-anchor":"middle", "font-size":14,
                            fill:"var(--wrong)", "font-family":"IBM Plex Sans, sans-serif"});
@@ -1507,14 +1512,19 @@
     }
     keyboard = false;
     var t2 = targetAt(p);
-    if (!hover || hover.slot !== t2.slot || hover.step !== t2.step || hover.staff !== t2.staff){
+    /* whether the pointer is in that chord's own column, not merely nearest
+       to it — the cross is offered on that, so it has to redraw on it too */
+    var near = Math.abs(p.x - SLOT_X[t2.slot]) <= 30;
+    if (!hover || hover.slot !== t2.slot || hover.step !== t2.step ||
+        hover.staff !== t2.staff || near !== hoverNear){
       hover = t2;
+      hoverNear = near;
       render();
     }
   });
   svg.addEventListener("pointerleave", function(){
     if (drag) return;
-    hover = null;
+    hover = null; hoverNear = false;
     svg.style.cursor = "crosshair";
     render();
   });
