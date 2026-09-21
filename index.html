@@ -810,7 +810,7 @@
 
   /* ---------- staff state -------------------------------------------------- */
   var showNames = false, soundOn = false;   /* off until asked for; Play turns it on */
-  var hover = null, drag = null, press = null, cursor = null, keyboard = false, lastClick = null;
+  var hover = null, drag = null, press = null, cursor = null, keyboard = false, lastClick = null, clearArmed = null;
 
   var MAX_VOICES = 4;                      /* one chord, four voices */
   /* a placed note that is not one of the chord's three tones draws in red */
@@ -849,15 +849,24 @@
     /* the preview and the note in hand follow the Note names toggle, rather
        than naming themselves whether or not it is on */
     if (drag) layerGhost.appendChild(noteGroup(state.notes[drag.index],{color:"var(--accent)",label:showNames}));
-    else if (focus && indexAt(focus.slot, focus.step) === -1){
-      if (slotFull(focus.slot)){
-        var full = el("text",{x:SLOT_X[focus.slot], y:52, "text-anchor":"middle", "font-size":8.5,
-                              fill:"var(--ink-soft)", "font-family":"IBM Plex Sans, sans-serif"});
-        full.textContent = "4 voices";
-        layerGhost.appendChild(full);
-      } else {
-        layerGhost.appendChild(noteGroup(focus,{color:"var(--accent)",label:showNames,opacity:0.55,pop:false}));
-      }
+    else if (focus && indexAt(focus.slot, focus.step) === -1 && !slotFull(focus.slot))
+      layerGhost.appendChild(noteGroup(focus,{color:"var(--accent)",label:showNames,opacity:0.55,pop:false}));
+
+    /* A full chord says so above its column. Click that and it turns into a
+       cross; click the cross and the chord is emptied. */
+    var cueSlot = clearArmed != null ? clearArmed
+                : (focus && !drag && slotFull(focus.slot) ? focus.slot : null);
+    if (cueSlot != null && SLOT_X[cueSlot] != null){
+      var armed = clearArmed === cueSlot;
+      var cue = el("text",{x:SLOT_X[cueSlot], y: armed ? 55 : 52, "text-anchor":"middle",
+                           "font-size": armed ? 14 : 8.5,
+                           fill: armed ? "var(--wrong)" : "var(--ink-soft)",
+                           "font-family":"IBM Plex Sans, sans-serif"});
+      var hint = el("title",{});
+      hint.textContent = armed ? "Clear this chord" : "Four voices — click to clear this chord";
+      cue.appendChild(hint);
+      cue.appendChild(document.createTextNode(armed ? "\u2715" : "4 voices"));
+      layerGhost.appendChild(cue);
     }
     updateVoices();
     drawLabels();
@@ -1349,13 +1358,22 @@
      to. Measuring a box around each notehead instead would reach further than
      the 6px between neighbouring pitches, so clicking the space above a note
      would pick up that note rather than placing a new one. */
+  /* the strip above a full chord's column, where the cue sits */
+  function cueHit(p){
+    if (p.y < 40 || p.y > 60) return null;
+    var slot = slotAt(p.x);
+    if (SLOT_X[slot] == null || !slotFull(slot)) return null;
+    return Math.abs(p.x - SLOT_X[slot]) <= 26 ? slot : null;
+  }
   function hitNote(p){
     var t = targetAt(p);
     return indexAt(t.slot, t.step);
   }
 
   function setCursor(p){
-    svg.style.cursor = drag ? "grabbing" : (hitNote(p) > -1 ? "grab" : "crosshair");
+    svg.style.cursor = drag ? "grabbing"
+      : cueHit(p) != null ? "pointer"
+      : hitNote(p) > -1 ? "grab" : "crosshair";
   }
 
   svg.addEventListener("pointermove", function(e){
@@ -1373,6 +1391,7 @@
       return;
     }
     keyboard = false;
+    if (clearArmed != null && cueHit(p) !== clearArmed && slotAt(p.x) !== clearArmed) clearArmed = null;
     var t2 = targetAt(p);
     if (!hover || hover.slot !== t2.slot || hover.step !== t2.step || hover.staff !== t2.staff){
       hover = t2;
@@ -1406,6 +1425,15 @@
     if (!press || press.id !== e.pointerId) return;
     var p = local(e), from = press;
     press = null;
+    var cue = cueHit(p);
+    if (cue != null && !drag){
+      if (clearArmed === cue){
+        state.notes = state.notes.filter(function(n){ return n.slot !== cue; });
+        clearArmed = null;
+      } else clearArmed = cue;
+      hover = null; lastClick = null;
+      setCursor(p); render(); return;
+    }
     if (drag){
       var d = drag; drag = null;
       var n = state.notes[d.index];
