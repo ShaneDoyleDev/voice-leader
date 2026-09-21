@@ -634,6 +634,12 @@
                          "text-anchor":"middle", "font-family":"Spectral, Georgia, serif",
                          "font-size":16, "font-weight": complete ? 600 : 500,
                          "letter-spacing":"0.04em"});
+      if (notesIn(i).length){
+        var hint = el("title",{});
+        hint.textContent = "Play this chord";
+        t.appendChild(hint);
+        t.style.cursor = "pointer";
+      }
       t.appendChild(document.createTextNode(numeralOf(degree)));
       var fig = inversionOf(i);
       if (fig){
@@ -855,7 +861,8 @@
 
   /* ---------- staff state -------------------------------------------------- */
   var showNames = false, soundOn = false;   /* off until asked for; Play turns it on */
-  var hover = null, hoverNear = false, drag = null, press = null, cursor = null;
+  var hover = null, hoverNear = false, hoverNumeral = false;
+  var drag = null, press = null, cursor = null;
   var keyboard = false, lastClick = null;
 
   var MAX_VOICES = 4;                      /* one chord, four voices */
@@ -895,7 +902,7 @@
     /* the preview and the note in hand follow the Note names toggle, rather
        than naming themselves whether or not it is on */
     if (drag) layerGhost.appendChild(noteGroup(drag.note,{color:"var(--accent)",label:showNames,pop:false}));
-    else if (focus && indexAt(focus.slot, focus.step) === -1 && !slotFull(focus.slot))
+    else if (focus && !hoverNumeral && indexAt(focus.slot, focus.step) === -1 && !slotFull(focus.slot))
       layerGhost.appendChild(noteGroup(focus,{color:"var(--accent)",label:showNames,opacity:0.55,pop:false}));
 
     /* A full chord takes no more notes; a cross over its column clears it.
@@ -1435,15 +1442,35 @@
      Each chord in turn, its four voices together, with the column lit while
      it sounds. Pressing Play turns the sound on if it was off, rather than
      playing to silence. */
-  var CHORD_MS = 1150, playTimer = null, playingSlot = null;
+  var CHORD_MS = 1150, playTimer = null, ringTimer = null, playingSlot = null;
   function stopPlayback(){
     if (playTimer){ clearTimeout(playTimer); playTimer = null; }
+    if (ringTimer){ clearTimeout(ringTimer); ringTimer = null; }
     playingSlot = null;
     playBtn.textContent = "Play";
     render();
   }
+  /* A click on a chord's numeral sounds that chord alone, its column lit
+     for as long as it rings — the progression's own gesture, one chord wide.
+     It gives way to Play rather than competing with it. */
+  function playSlot(slot){
+    var notes = notesIn(slot);
+    if (!notes.length) return;
+    if (playTimer) stopPlayback();
+    if (!soundOn){
+      soundOn = true;
+      btnSound.setAttribute("aria-pressed", "true");
+    }
+    audio();
+    notes.forEach(function(n){ play(slot, n.step); });
+    playingSlot = slot;
+    if (ringTimer) clearTimeout(ringTimer);
+    ringTimer = setTimeout(stopPlayback, CHORD_MS);
+    render();
+  }
   function playProgression(){
-    if (playTimer || playingSlot != null){ stopPlayback(); return; }
+    if (playTimer){ stopPlayback(); return; }
+    if (ringTimer){ clearTimeout(ringTimer); ringTimer = null; playingSlot = null; }
     if (!soundOn){
       soundOn = true;
       btnSound.setAttribute("aria-pressed", "true");
@@ -1482,13 +1509,26 @@
     if (SLOT_X[slot] == null || !slotFull(slot)) return null;
     return Math.abs(p.x - SLOT_X[slot]) <= 26 ? slot : null;
   }
+  /* the numeral under a chord, which sounds that chord on its own. Bounded
+     to its own column, like the cross above it. An empty chord's numeral has
+     nothing to play, but it still takes the click: below the staff a click
+     otherwise lands on the lowest line, and a stray E2 is no answer to
+     pressing a numeral. */
+  function numeralHit(p){
+    if (p.y < 217 || p.y > 237) return null;
+    var slot = slotAt(p.x);
+    if (SLOT_X[slot] == null) return null;
+    return Math.abs(p.x - SLOT_X[slot]) <= 26 ? slot : null;
+  }
   function hitNote(p){
     var t = targetAt(p);
     return indexAt(t.slot, t.step);
   }
 
   function setCursor(p){
+    var num = numeralHit(p);
     svg.style.cursor = drag ? "grabbing"
+      : num != null ? (notesIn(num).length ? "pointer" : "default")
       : hitNote(p) > -1 ? "grab"          /* a note there answers first: pressing it drags */
       : cueHit(p) != null ? "pointer" : "crosshair";
   }
@@ -1514,17 +1554,18 @@
     var t2 = targetAt(p);
     /* whether the pointer is in that chord's own column, not merely nearest
        to it — the cross is offered on that, so it has to redraw on it too */
-    var near = Math.abs(p.x - SLOT_X[t2.slot]) <= 30;
+    var near = Math.abs(p.x - SLOT_X[t2.slot]) <= 30, onNumeral = numeralHit(p) != null;
     if (!hover || hover.slot !== t2.slot || hover.step !== t2.step ||
-        hover.staff !== t2.staff || near !== hoverNear){
+        hover.staff !== t2.staff || near !== hoverNear || onNumeral !== hoverNumeral){
       hover = t2;
       hoverNear = near;
+      hoverNumeral = onNumeral;
       render();
     }
   });
   svg.addEventListener("pointerleave", function(){
     if (drag) return;
-    hover = null; hoverNear = false;
+    hover = null; hoverNear = false; hoverNumeral = false;
     svg.style.cursor = "crosshair";
     render();
   });
@@ -1534,7 +1575,7 @@
      than by element, and only when neither of them was a drag. */
   var DOUBLE_MS = 450;
   svg.addEventListener("pointerdown", function(e){
-    var p = local(e), hit = hitNote(p);
+    var p = local(e), hit = numeralHit(p) != null ? -1 : hitNote(p);
     svg.setPointerCapture(e.pointerId);
     press = { id:e.pointerId, x:p.x, y:p.y };
     if (hit > -1){ drag = { note:state.notes[hit], moved:false }; setCursor(p); render(); }
@@ -1554,6 +1595,12 @@
       hover = null; lastClick = null;
       clearNotes(cue);                 /* the same drift as Clear notes */
       setCursor(p); render(); return;
+    }
+    var num = numeralHit(p);
+    if (num != null && !drag){
+      lastClick = null;
+      playSlot(num);
+      setCursor(p); return;
     }
     if (drag){
       var d = drag; drag = null;
@@ -1626,7 +1673,7 @@
     }
     if (!handled) return;
     e.preventDefault();
-    keyboard = true; hover = null; render();
+    keyboard = true; hover = null; hoverNumeral = false; render();
   });
   wrap.addEventListener("focus", function(){ keyboard = true; render(); });
   wrap.addEventListener("blur", function(){ keyboard = false; render(); });
