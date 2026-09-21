@@ -1,5 +1,7 @@
 # Voice Leader
 
+**[Open it here](https://shanedoyledev.github.io/voice-leader/)** — it runs in the browser, with nothing to install.
+
 An interactive SATB (soprano/alto/tenor/bass) voice-leading trainer. Pick a key and a chord progression, place each voice's notes on the staff, and get checked against the standard rules of four-part writing — the same way a theory instructor would mark it.
 
 ## What it does
@@ -42,7 +44,7 @@ Triads only, no sevenths. All seven diatonic degrees are available; in minor, V 
 
 ## Tech
 
-Single self-contained HTML file. No build step, no external services — just open it in a browser. Everything is drawn as SVG: staff lines, stems, ledger lines and the brace are generated in code, while the clefs, accidentals and noteheads are real engraved outlines. All the theory (scales, chord spelling, the rule checks) is plain JavaScript with no external libraries.
+Single self-contained HTML file. No build step, no external services — just open it in a browser, or visit the [published page](https://shanedoyledev.github.io/voice-leader/), which GitHub Pages serves straight from `index.html` on `main`: a push is a deploy. Everything is drawn as SVG: staff lines, stems, ledger lines and the brace are generated in code, while the clefs, accidentals and noteheads are real engraved outlines. All the theory (scales, chord spelling, the rule checks) is plain JavaScript with no external libraries.
 
 The clef, accidental (sharp, flat, natural, double sharp) and notehead outlines were extracted from [Bravura](https://github.com/steinbergmedia/bravura), Steinberg's reference SMuFL font, and inlined as SVG path data — about 5KB for the seven glyphs — so the page loads no font and makes no network request, but the notation is the genuine engraved shapes. Bravura is © Steinberg Media Technologies GmbH, licensed under the SIL Open Font License 1.1.
 
