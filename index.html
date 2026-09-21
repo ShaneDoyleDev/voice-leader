@@ -1025,15 +1025,20 @@
      tone of the chord, all three tones present — its notes are named top
      down: soprano, alto, tenor, bass. Read fresh on every render, so moving
      a note renames whatever it has become. */
-  function firstChordVoices(){
-    if (!state.chords.length || slotCount(0) !== MAX_VOICES) return null;
-    var v = voicesOf(0), tones = chordLetters(state.chords[0]), seen = {}, i;
-    for (i = 0; i < v.length; i++){
-      if (tones.indexOf(v[i].letter) === -1) return null;     /* a note outside the chord */
-      seen[v[i].letter] = true;
+  /* four voices, every one a tone of the chord, all three tones present */
+  function chordIsClean(slot){
+    if (slot >= state.chords.length || slotCount(slot) !== MAX_VOICES) return false;
+    var notes = notesIn(slot), tones = chordLetters(state.chords[slot]), seen = {}, i, letter;
+    for (i = 0; i < notes.length; i++){
+      letter = notes[i].step % 7;
+      if (tones.indexOf(letter) === -1) return false;          /* a note outside the chord */
+      seen[letter] = true;
     }
-    for (i = 0; i < tones.length; i++) if (!seen[tones[i]]) return null;   /* a tone missing */
-    return v;                                                 /* bass first */
+    for (i = 0; i < tones.length; i++) if (!seen[tones[i]]) return false;  /* a tone missing */
+    return true;
+  }
+  function firstChordVoices(){
+    return chordIsClean(0) ? voicesOf(0) : null;               /* bass first */
   }
   /* The opening chord fixes the voices. Every later chord's four notes are
      then matched to those same four lines by the assignment that moves them
@@ -1121,13 +1126,13 @@
     return rows;
   }
 
-  /* The lowest sounding note decides the figure: the root takes none, the
-     third makes it a six, the fifth a six-four. A bass that is not a tone of
-     the chord at all is left unfigured — the checklist has that covered. */
+  /* Once a chord is right — four voices, all of them chord tones, all three
+     tones there — the lowest sounding note figures it: the root takes none,
+     the third makes it a six, the fifth a six-four. Anything short of that
+     goes unfigured; the checklist says why. */
   function inversionOf(slot){
-    var notes = notesIn(slot);
-    if (!notes.length) return "";
-    var at = chordLetters(state.chords[slot]).indexOf(notes[0].step % 7);
+    if (!chordIsClean(slot)) return "";      /* no figure for a chord that is not yet right */
+    var at = chordLetters(state.chords[slot]).indexOf(notesIn(slot)[0].step % 7);
     return at === 1 ? "6" : at === 2 ? "64" : "";
   }
   function figureNode(fig){
