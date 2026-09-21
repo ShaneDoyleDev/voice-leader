@@ -910,6 +910,25 @@
   var VOICE_SHORT = ["B", "T", "A", "S"];
   var ROLES = ["root", "third", "fifth"];
 
+  /* Name an interval the way a theory class would: the diatonic distance
+     gives the number, the semitones give the quality. */
+  var ORDINALS = ["unison","second","third","fourth","fifth","sixth","seventh","octave","ninth",
+                  "tenth","eleventh","twelfth","thirteenth","fourteenth","double octave"];
+  var MAJOR_SEMIS = [0,2,4,5,7,9,11];
+  function intervalName(low, high){
+    var dia = high.step - low.step, semi = high.midi - low.midi;
+    if (dia < 0) return null;
+    var expected = MAJOR_SEMIS[dia % 7] + 12 * Math.floor(dia / 7), off = semi - expected;
+    var perfect = (dia % 7 === 0 || dia % 7 === 3 || dia % 7 === 4);   /* unison, fourth, fifth */
+    var quality = off === 0 ? (perfect ? "perfect" : "major")
+                : off === -1 ? (perfect ? "diminished" : "minor")
+                : off === 1 ? "augmented"
+                : (off === -2 && !perfect) ? "diminished" : null;
+    var name = ORDINALS[dia] || (dia + 1) + "th";
+    return quality ? quality + " " + name : name;
+  }
+  function withArticle(str){ return (/^[aeiou]/i.test(str) ? "an " : "a ") + str; }
+
   function voicesOf(slot){
     return state.notes.filter(function(n){ return n.slot === slot; })
       .map(function(n){
@@ -1076,11 +1095,13 @@
       /* spacing: the two upper gaps only */
       if (v.length === MAX_VOICES){
         [[3, 2], [2, 1]].forEach(function(pair){
-          var gap = v[pair[0]].midi - v[pair[1]].midi;
-          if (gap > 12)
-            add("error", VOICES[pair[0]] + " and " + VOICES[pair[1]] + " are " + gap +
-                " semitones apart (" + v[pair[1]].name + " to " + v[pair[0]].name +
-                ") \u2014 keep adjacent upper voices within an octave.");
+          var hi = v[pair[0]], lo = v[pair[1]], gap = hi.midi - lo.midi;
+          if (gap <= 12) return;
+          var named = intervalName(lo, hi);
+          add("error", VOICES[pair[0]] + " and " + VOICES[pair[1]] + " are " +
+              (named ? withArticle(named) : gap + " semitones") + " apart \u2014 " +
+              lo.name + " to " + hi.name + ", " + gap +
+              " semitones \u2014 keep adjacent upper voices within an octave.");
         });
       }
     });

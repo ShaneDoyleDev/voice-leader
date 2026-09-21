@@ -19,7 +19,7 @@ An interactive SATB (soprano/alto/tenor/bass) voice-leading trainer. Pick a key 
   - **Completeness** — root, third and fifth must all be present somewhere in the four voices; anything missing is an error.
   - **Doubling** — reports which tone is doubled. Doubling the third is flagged as the weaker choice rather than an error; the root or fifth is preferred.
   - **Voice crossing** — a voice sounding above the one named over it (tenor above alto, say) is an error, reported with both notes.
-  - **Spacing** — Soprano–Alto and Alto–Tenor each stay within an octave. Tenor–Bass has no limit.
+  - **Spacing** — Soprano–Alto and Alto–Tenor each stay within an octave. Tenor–Bass has no limit. A gap that is too wide is named as an interval as well as measured: “a major tenth apart — C4 to E5, 16 semitones”.
   - **Leading-tone doubling** — a doubled leading tone in a V is a caution to watch on the next move.
   - **Leading-tone resolution**, whenever a V moves to the tonic: undoubled, it must rise by step; doubled, at least one copy must rise and the other must either rise too or drop by leap to the fifth of the tonic — the recognised exception.
   - **Parallel fifths and octaves** against the previous chord, across all six voice pairs. Flagged only when the same perfect interval appears in both chords *and* both voices moved the same way. Contrary and oblique motion into a repeated perfect interval are left alone, and so are hidden (direct) fifths and octaves.
