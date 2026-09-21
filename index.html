@@ -681,7 +681,17 @@
      size. The scale is a function of elapsed time rather than a CSS animation,
      because every render rebuilds the noteheads and a CSS animation would
      restart from zero on each one — one twitch of the mouse and it stutters. */
-  var POP_MS = 180, POP_FROM = 0.78, popping = null, popFrame = null;
+  /* requestAnimationFrame stops in a background tab and is throttled in some
+     embedded views. Every animation here paints from the clock, so a missed
+     frame is harmless — but a frame that never comes would leave the last
+     one on the staff. A timeout backstop keeps them all finishing. */
+  function nextFrame(run){
+    var done = false;
+    var id = requestAnimationFrame(function(){ if (!done){ done = true; run(); } });
+    setTimeout(function(){ if (!done){ done = true; cancelAnimationFrame(id); run(); } }, 120);
+  }
+
+  var POP_MS = 180, POP_FROM = 0.78, RIPPLE_MS = 430, popping = null, popGen = 0;
   function reducedMotion(){
     try { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; }
     catch (e) { return false; }
@@ -691,18 +701,29 @@
     var t = Math.min(1, (performance.now() - popping.at) / POP_MS);
     return POP_FROM + (1 - POP_FROM) * (1 - Math.pow(1 - t, 3));   /* ease out */
   }
-  function startPop(slot, step){
+  function startPop(slot, step, staff){
     if (reducedMotion()) return;
-    popping = { slot:slot, step:step, at:performance.now() };
-    if (popFrame) cancelAnimationFrame(popFrame);
+    popping = { slot:slot, step:step, staff:staff, at:performance.now() };
+    var gen = ++popGen;
     (function frame(){
-      if (!popping) return;
-      if (performance.now() - popping.at >= POP_MS){
-        popping = null; popFrame = null; render(); return;
+      if (gen !== popGen || !popping) return;              /* a later note took over */
+      if (performance.now() - popping.at >= RIPPLE_MS){    /* the ring outlasts the pop */
+        popping = null; render(); return;
       }
       render();
-      popFrame = requestAnimationFrame(frame);
+      nextFrame(frame);
     })();
+  }
+  /* a thin ring that widens off the new notehead and fades as it goes */
+  function drawRipple(){
+    if (!popping || SLOT_X[popping.slot] == null) return;
+    var t = Math.min(1, (performance.now() - popping.at) / RIPPLE_MS);
+    var ease = 1 - Math.pow(1 - t, 2);
+    layerGhost.appendChild(el("circle",{
+      cx:SLOT_X[popping.slot], cy:yOf(popping.step, popping.staff),
+      r:(5 + 17 * ease).toFixed(2), fill:"none",
+      stroke:"var(--accent)", "stroke-width":1, opacity:(0.7 * (1 - t)).toFixed(3)
+    }));
   }
 
   /* Checking the voicing draws the parallels it finds: a red line along each
@@ -710,7 +731,7 @@
      Nothing else is drawn — a clean progression shows no lines at all. The
      stroke fills in against the clock rather than by a CSS animation, since
      every render rebuilds these and a CSS one would start over on each. */
-  var FLOW_MS = 420, FLOW_STAGGER = 110, flowAt = null, flowFrame = null;
+  var FLOW_MS = 420, FLOW_STAGGER = 110, flowAt = null, flowFrame = false;
   function parallelVoicesAt(move){
     var voices = [];
     if (!report || !report.parallels) return voices;
@@ -751,8 +772,10 @@
         }));
       });
     }
-    if (running && !flowFrame)
-      flowFrame = requestAnimationFrame(function(){ flowFrame = null; render(); });
+    if (running && !flowFrame){
+      flowFrame = true;
+      nextFrame(function(){ flowFrame = false; render(); });
+    }
   }
 
   function noteGroup(note, opts){
@@ -839,6 +862,7 @@
     updateVoices();
     drawLabels();
     drawFlow();
+    drawRipple();
     renderChips();
     if (report && reportKey !== notesKey()) report = null;   /* edited since — stale */
     if (!report) flowAt = null;
@@ -1408,7 +1432,7 @@
     if (indexAt(t.slot, t.step) === -1 && !slotFull(t.slot)){
       state.notes.push(t);
       play(t.slot, t.step);
-      startPop(t.slot, t.step);
+      startPop(t.slot, t.step, t.staff);
     }
     hover = t;
     setCursor(p);
@@ -1440,7 +1464,7 @@
         else if (!slotFull(cursor.slot)){
           state.notes.push({slot:cursor.slot, step:cursor.step, staff:cursor.staff});
           play(cursor.slot, cursor.step);
-          startPop(cursor.slot, cursor.step);
+          startPop(cursor.slot, cursor.step, cursor.staff);
         }
         break;
       case "Backspace": case "Delete":
