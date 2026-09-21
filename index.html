@@ -1414,6 +1414,8 @@
       } catch (e) { /* same */ }
     });
   }
+  /* Nothing sounds as it is written — placing, dragging and clearing are
+     all silent. A chord is heard when it is asked for: Play, or its chip. */
   function play(slot, step){
     var ctx = audio();
     if (!ctx) return;
@@ -1586,7 +1588,6 @@
       if (at < 0){ hover = targetAt(p); setCursor(p); render(); return; }   /* gone mid-drag */
       var travelled = Math.hypot(p.x - from.x, p.y - from.y) > 10;
       if (d.moved){
-        play(n.slot, n.step);
         lastClick = null;
       } else if (travelled){
         lastClick = null;      /* a drag with nowhere to land leaves the note put */
@@ -1606,7 +1607,6 @@
     lastClick = null;
     if (indexAt(t.slot, t.step) === -1 && !slotFull(t.slot)){
       state.notes.push(t);
-      play(t.slot, t.step);
       startPop(t.slot, t.step, t.staff);
     }
     hover = t;
@@ -1639,7 +1639,6 @@
         if (i > -1) state.notes.splice(i, 1);
         else if (!slotFull(cursor.slot)){
           state.notes.push({slot:cursor.slot, step:cursor.step, staff:cursor.staff});
-          play(cursor.slot, cursor.step);
           startPop(cursor.slot, cursor.step, cursor.staff);
         }
         break;
