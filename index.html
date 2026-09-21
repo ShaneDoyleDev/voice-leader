@@ -299,7 +299,7 @@
       </div>
       <div class="toolbar">
         <button type="button" id="btn-names" aria-pressed="false">Note names</button>
-        <button type="button" id="btn-sound" aria-pressed="true">Sound</button>
+        <button type="button" id="btn-sound" aria-pressed="false">Sound</button>
         <span class="spacer"></span>
         <button type="button" id="btn-clear" class="ghost">Clear notes</button>
       </div>
@@ -786,7 +786,7 @@
   }
 
   /* ---------- staff state -------------------------------------------------- */
-  var showNames = false, soundOn = true;
+  var showNames = false, soundOn = false;   /* off until asked for; Play turns it on */
   var hover = null, drag = null, press = null, cursor = null, keyboard = false, lastClick = null;
 
   var MAX_VOICES = 4;                      /* one chord, four voices */
