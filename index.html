@@ -238,6 +238,11 @@
     font-variant-numeric:tabular-nums;
   }
   .chip b{font:500 13px/1 "Spectral",Georgia,serif;color:var(--accent);letter-spacing:.04em}
+  .fig{                                  /* a figured-bass number, stacked */
+    display:inline-flex; flex-direction:column; align-items:center;
+    font-size:.58em; line-height:1.02; vertical-align:.42em; margin-left:1px;
+  }
+  .fig i{font-style:normal}
   .chip span{font-family:"Spectral",Georgia,serif;font-size:15px;letter-spacing:.02em}
   .chip .voiced + .voiced{margin-left:9px}
   .chip .voiced i{
@@ -636,7 +641,18 @@
                          "text-anchor":"middle", "font-family":"Spectral, Georgia, serif",
                          "font-size":16, "font-weight": complete ? 600 : 500,
                          "letter-spacing":"0.04em"});
-      t.textContent = numeralOf(degree);
+      t.appendChild(document.createTextNode(numeralOf(degree)));
+      var fig = inversionOf(i);
+      if (fig){
+        var six = el("tspan",{dy:-5, "font-size":9.5});
+        six.textContent = fig.charAt(0);
+        t.appendChild(six);
+        if (fig.length > 1){
+          var four = el("tspan",{dy:9, dx:-5.5, "font-size":9.5});
+          four.textContent = fig.charAt(1);
+          t.appendChild(four);
+        }
+      }
       layerLabels.appendChild(t);
 
       var row = el("text",{x:SLOT_X[i], y:244, "text-anchor":"middle",
@@ -945,7 +961,7 @@
       var li = document.createElement("li");
       li.className = "chip";
       var b = document.createElement("b");
-      b.textContent = numeralOf(state.chords[slot]);
+      numeralInto(b, slot);
       var s = document.createElement("span");
       var row = rows && rows[slot];
       if (row){
@@ -1105,6 +1121,30 @@
     return rows;
   }
 
+  /* The lowest sounding note decides the figure: the root takes none, the
+     third makes it a six, the fifth a six-four. A bass that is not a tone of
+     the chord at all is left unfigured — the checklist has that covered. */
+  function inversionOf(slot){
+    var notes = notesIn(slot);
+    if (!notes.length) return "";
+    var at = chordLetters(state.chords[slot]).indexOf(notes[0].step % 7);
+    return at === 1 ? "6" : at === 2 ? "64" : "";
+  }
+  function figureNode(fig){
+    var f = document.createElement("span");
+    f.className = "fig";
+    fig.split("").forEach(function(d){
+      var digit = document.createElement("i");
+      digit.textContent = d;
+      f.appendChild(digit);
+    });
+    return f;
+  }
+  function numeralInto(node, slot){
+    node.appendChild(document.createTextNode(numeralOf(state.chords[slot])));
+    var fig = inversionOf(slot);
+    if (fig) node.appendChild(figureNode(fig));
+  }
   function allVoiced(){
     if (!state.chords.length) return false;
     for (var i = 0; i < state.chords.length; i++) if (slotCount(i) !== MAX_VOICES) return false;
@@ -1128,7 +1168,7 @@
 
     state.chords.forEach(function(degree, slot){
       var v = voicesAt(slot), tones = chordLetters(degree), counts = {};
-      var add = block(numeralOf(degree), spell(degree));
+      var add = block([slot], spell(degree));
       v.forEach(function(n){ counts[n.letter] = (counts[n.letter] || 0) + 1; });
 
       /* completeness */
@@ -1178,7 +1218,7 @@
     /* what happens between one chord and the next */
     for (var i = 0; i + 1 < state.chords.length; i++){
       var a = voicesAt(i), b = voicesAt(i + 1);
-      var add = block(numeralOf(state.chords[i]) + " \u2192 " + numeralOf(state.chords[i + 1]));
+      var add = block([i, " \u2192 ", i + 1]);
       if (a.length !== MAX_VOICES || b.length !== MAX_VOICES) continue;
 
       /* parallel fifths and octaves across all six pairs. Only the same
@@ -1256,7 +1296,10 @@
       var li = document.createElement("li");
       li.className = "block";
       var label = document.createElement("b");
-      label.textContent = b.label;
+      b.label.forEach(function(part){
+        if (typeof part === "number") numeralInto(label, part);
+        else label.appendChild(document.createTextNode(part));
+      });
       if (b.sub){
         var sub = document.createElement("small");
         sub.textContent = b.sub;

@@ -8,6 +8,7 @@ An interactive SATB (soprano/alto/tenor/bass) voice-leading trainer. Pick a key 
 - **Build a progression.** Chain together any of the seven diatonic triads — I ii iii IV V vi vii° in major, i ii° III iv V VI vii° in minor — in whatever order you want, up to eight chords. Each numeral shows its own spelling in the current key before you add it.
 - **Every note can sound.** With **Sound** switched on from the staff toolbar, placing a note plays it on a sampled grand piano, so you hear the voicing as you build it. It starts off; pressing Play switches it on.
 - **Wrong notes show in red.** A note that is not one of the chord's three tones draws in red on the staff, so a misplaced voice is obvious before you check anything.
+- **The bass figures the numeral.** Put the root lowest and the chord is plain I; put the third lowest and it becomes I⁶, the fifth and it becomes I⁶₄ — stacked as figured bass, on the staff, in the readout and throughout the checklist. A bass that is not a tone of the chord at all is left unfigured.
 - **The chord spelling keeps score.** Under each Roman numeral sits the chord's spelling; each tone lights up once you have placed it, in any octave, so you can see at a glance which tone the chord is still missing. The numeral itself lights up when all three tones are there, and a dot under a tone means you have doubled it.
 - **The opening chord fixes the voices.** As soon as the first chord is complete — four notes, every one of them a tone of the chord, all three tones present — its notes are labelled S, A, T and B down the left, top note first, and those four voices hold for the rest of the progression. Only this chord carries the letters; every later chord takes its voices when it first fills up, by the assignment that moves each line least, and then keeps them. So a note dragged past another inside a later chord stays the voice it was — a real crossing, named as one — while the opening chord always re-reads top down, since it is the chord the others are fixed to. Lose a note and that chord unfixes until it is whole again. Every check below follows these voices rather than the pitch order, and the readout under the staff names each note's voice, so a crossing is plain there too.
 - **Hear it back.** **Play** sits in the staff toolbar next to Sound, there throughout, so a part-written progression can be heard as you go. It walks the chords one at a time — whatever voices are in each sounding together, the column lit while they do, an empty chord passing as a silent beat. Press it again to stop. If the sound was switched off it switches back on rather than playing to silence.
@@ -36,7 +37,7 @@ An interactive SATB (soprano/alto/tenor/bass) voice-leading trainer. Pick a key 
 
 The checklist reports in prose, with the parallels it finds also drawn on the staff.
 
-Root-position triads only. All seven diatonic degrees are available; in minor, V and vii° raise the leading tone and the rest stay diatonic to the natural minor scale. No inversions or seventh chords yet.
+Triads only, no sevenths. All seven diatonic degrees are available; in minor, V and vii° raise the leading tone and the rest stay diatonic to the natural minor scale. A progression is built from plain degrees, but the voicing decides the inversion and the label follows it.
 
 ## Tech
 
