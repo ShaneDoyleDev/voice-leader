@@ -590,15 +590,12 @@
   /* C4 to F5 — a step short of the soprano’s top, so a leading tone always
      has the one note above it that it is obliged to rise to */
   var SOP_LO  = 28, SOP_HI  = 38;
+  /* Every chord stands on its own root — the exercise is about the three
+     voices above the bass, not about reading an inversion. */
   function makeBass(chords){
     var line = [], prev = null;
-    chords.forEach(function(degree, i){
-      var tones = chordLetters(degree), last = i === chords.length - 1, letter;
-      /* the ends stand on their root; a diminished triad never does, so it
-         takes the first inversion it is nearly always written in */
-      if (quality(degree) === "dim") letter = tones[1];
-      else if (i === 0 || last) letter = tones[0];
-      else letter = Math.random() < 0.3 ? tones[1] : tones[0];
+    chords.forEach(function(degree){
+      var letter = chordLetters(degree)[0];
       var step = prev == null
         ? stepsFor(letter, 19, 25)[0]        /* seven steps: one octave, one candidate */
         : nextInLine(prev, [letter], BASS_LO, BASS_HI, 5);
@@ -1994,8 +1991,8 @@
   document.getElementById("clearprog").addEventListener("click", function(){ state.chords = []; drawSetup(); });
 
   var TASK = {
-    bass:"<b>The bass is given.</b> Write the tenor, alto and soprano above it. Each numeral " +
-         "takes its figure from that bass note once its chord is right.",
+    bass:"<b>The bass is given.</b> Write the tenor, alto and soprano above it. Every chord " +
+         "stands on its root, so there is nothing figured \u2014 read the numerals.",
     soprano:"<b>The soprano is given.</b> Harmonise it \u2014 alto, tenor and bass under each " +
             "note. The figures follow whatever bass you write."
   };
