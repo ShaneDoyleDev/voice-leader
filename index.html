@@ -924,8 +924,9 @@
     playBtn.disabled = !state.notes.length;
     if (!state.notes.length && playTimer) stopPlayback();
     checkHint.textContent = ready
-      ? "Completeness, doubling, spacing, the leading tone and parallels."
-      : "Give every chord at least three notes to run the checklist.";
+      ? "Doubling, spacing, crossing, the leading tone and parallels."
+      : "Every chord needs its own tones \u2014 three notes or four, none of them foreign \u2014 " +
+        "before the checklist can run.";
   }
 
   var chips = document.getElementById("chips");
@@ -1151,9 +1152,11 @@
     var fig = inversionOf(slot);
     if (fig) node.appendChild(figureNode(fig));
   }
+  /* the checklist is about voice leading, so it waits until every chord is a
+     chord: its own tones, nothing foreign, nothing missing */
   function allVoiced(){
     if (!state.chords.length) return false;
-    for (var i = 0; i < state.chords.length; i++) if (slotCount(i) < 3) return false;
+    for (var i = 0; i < state.chords.length; i++) if (!chordIsClean(i)) return false;
     return true;
   }
 
