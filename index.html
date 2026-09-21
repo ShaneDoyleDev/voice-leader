@@ -657,7 +657,7 @@
 
     var rows = chordVoices();
     if (rows){
-      rows.forEach(function(row, slot){
+      [rows[0]].forEach(function(row, slot){       /* the chord that fixes them */
         if (!row) return;
         row.forEach(function(n, voice){
           var t = el("text",{x:SLOT_X[slot] - 28, y:yOf(n.step, n.staff) + 3.5, "text-anchor":"end",
@@ -701,22 +701,25 @@
     })();
   }
 
-  /* Once a chord is voiced, a faint line runs from each voice of the chord
-     before it to the same voice here, so the four lines are visible as
-     lines. Each pair draws itself once, when it first becomes complete;
-     the length is stroked in over time rather than by a CSS animation,
-     since every render rebuilds these and a CSS one would start over. */
-  var FLOW_MS = 420, flowStart = {}, flowFrame = null;
+  /* Checking the voicing draws it: a faint line from each voice of one chord
+     to the same voice in the next, chord by chord across the progression.
+     The lines belong to the report, so editing a note takes them away with
+     it. The stroke fills in against the clock rather than by a CSS
+     animation, since every render rebuilds these and a CSS one would start
+     over on each. */
+  var FLOW_MS = 420, FLOW_STAGGER = 110, flowAt = null, flowFrame = null;
   function drawFlow(){
     while (layerFlow.firstChild) layerFlow.removeChild(layerFlow.firstChild);
+    if (!report || flowAt == null) return;
     var rows = chordVoices();
-    if (!rows){ flowStart = {}; return; }
+    if (!rows) return;
     var now = performance.now(), running = false, half = glyphW("noteheadBlack", S) / 2, i, v;
     for (i = 0; i + 1 < rows.length; i++){
       var a = rows[i], b = rows[i + 1];
-      if (!a || !b){ delete flowStart[i]; continue; }
-      if (flowStart[i] == null) flowStart[i] = reducedMotion() ? now - FLOW_MS : now;
-      var t = Math.min(1, (now - flowStart[i]) / FLOW_MS);
+      if (!a || !b) continue;
+      var t = (now - (flowAt + i * FLOW_STAGGER)) / FLOW_MS;
+      if (t <= 0){ running = true; continue; }        /* its turn has not come yet */
+      t = Math.min(1, t);
       if (t < 1) running = true;
       var ease = 1 - Math.pow(1 - t, 3);
       for (v = 0; v < MAX_VOICES; v++){
@@ -816,6 +819,7 @@
     drawFlow();
     renderChips();
     if (report && reportKey !== notesKey()) report = null;   /* edited since — stale */
+    if (!report) flowAt = null;
     renderReport();
     var ready = allVoiced();
     checkBtn.hidden = !ready;
@@ -829,6 +833,7 @@
   checkBtn.addEventListener("click", function(){
     report = runChecks();
     reportKey = notesKey();
+    flowAt = performance.now() - (reducedMotion() ? 1e6 : 0);   /* draw the voices */
     renderReport();
     document.getElementById("results").scrollIntoView({block:"nearest", behavior:"smooth"});
   });
