@@ -708,6 +708,14 @@
      animation, since every render rebuilds these and a CSS one would start
      over on each. */
   var FLOW_MS = 420, FLOW_STAGGER = 110, flowAt = null, flowFrame = null;
+  function inParallel(move, voice){
+    if (!report || !report.parallels) return false;
+    for (var i = 0; i < report.parallels.length; i++){
+      var p = report.parallels[i];
+      if (p.move === move && (p.lo === voice || p.hi === voice)) return true;
+    }
+    return false;
+  }
   function drawFlow(){
     while (layerFlow.firstChild) layerFlow.removeChild(layerFlow.firstChild);
     if (!report || flowAt == null) return;
@@ -726,10 +734,13 @@
         var x1 = SLOT_X[i] + half + 3, y1 = yOf(a[v].step, a[v].staff);
         var x2 = SLOT_X[i + 1] - half - 3, y2 = yOf(b[v].step, b[v].staff);
         var len = Math.hypot(x2 - x1, y2 - y1);
+        var lockstep = inParallel(i, v);      /* one of the two voices the check caught */
         layerFlow.appendChild(el("line",{
           x1:x1, y1:y1, x2:x2, y2:y2,
-          stroke:"var(--accent)", "stroke-width":1.2, "stroke-linecap":"round",
-          opacity:0.32, "stroke-dasharray":len.toFixed(2),
+          stroke: lockstep ? "var(--wrong)" : "var(--accent)",
+          "stroke-width": lockstep ? 1.8 : 1.2, "stroke-linecap":"round",
+          opacity: lockstep ? 0.92 : 0.32,
+          "stroke-dasharray":len.toFixed(2),
           "stroke-dashoffset":(len * (1 - ease)).toFixed(2)
         }));
       }
@@ -1001,7 +1012,7 @@
   }
 
   function runChecks(){
-    var report = { blocks:[], errors:0, cautions:0 };
+    var report = { blocks:[], parallels:[], errors:0, cautions:0 };
     function block(label, sub){
       var b = { label:label, sub:sub || "", items:[] };
       report.blocks.push(b);
@@ -1080,6 +1091,7 @@
           add("error", "Parallel " + (before === 7 ? "fifths" : "octaves") + ": " +
               VOICES[lo] + " and " + VOICES[hi] + " move " + a[lo].name + "\u2013" + a[hi].name +
               " to " + b[lo].name + "\u2013" + b[hi].name + ".");
+          report.parallels.push({ move:i, lo:lo, hi:hi });
         }
       }
 
