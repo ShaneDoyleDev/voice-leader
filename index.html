@@ -570,15 +570,41 @@
     for (step = lo; step <= hi; step++) if (step % 7 === letter) out.push(step);
     return out;
   }
+  /* A line needs a shape as well as smooth joins, or it wanders around the
+     same three notes and sounds like nothing. Each line is given a contour —
+     an arch, a climb, a descent into the cadence — as a target register for
+     every chord in turn. The chord still decides which notes are available;
+     the contour decides which of them the line is reaching for. */
+  var SHAPES = [
+    function(t){ return Math.sin(Math.PI * t); },        /* up to a high point, then away */
+    function(t){ return t; },                            /* a climb */
+    function(t){ return 1 - t; },                        /* a descent into the close */
+    function(t){ return Math.sin(Math.PI * t * 0.5); }   /* a rise that stays up */
+  ];
+  function contour(n, floor, span){
+    var shape = pick(SHAPES), out = [], i;
+    for (i = 0; i < n; i++) out.push(floor + span * shape(n < 2 ? 0 : i / (n - 1)));
+    return out;
+  }
+  function toneNear(letters, lo, hi, target){
+    var cands = [];
+    letters.forEach(function(l){ cands = cands.concat(stepsFor(l, lo, hi)); });
+    return cands.reduce(function(a, b){
+      return Math.abs(b - target) < Math.abs(a - target) ? b : a;
+    });
+  }
   /* the next note of a written line: a step or two is likeliest, a leap
-     beyond a sixth never happens, and a repeat is allowed but rare */
-  function nextInLine(prev, letters, lo, hi, leap){
+     beyond a sixth never happens, a repeat is allowed but rare, and of the
+     notes that qualify the one nearest the contour is likeliest of all */
+  function nextInLine(prev, letters, lo, hi, leap, target){
     var cands = [];
     letters.forEach(function(l){ cands = cands.concat(stepsFor(l, lo, hi)); });
     if (!cands.length) return prev;
     var scored = cands.map(function(step){
       var d = Math.abs(step - prev);
-      return { step:step, w: d === 0 ? 0.5 : d <= 2 ? 3 : d <= 4 ? 1.3 : d <= leap ? 0.4 : 0 };
+      var w = d === 0 ? 0.5 : d <= 2 ? 3 : d <= 4 ? 1.3 : d <= leap ? 0.4 : 0;
+      if (w && target != null) w *= Math.pow(0.55, Math.abs(step - target));   /* pull to the shape */
+      return { step:step, w:w };
     }).filter(function(c){ return c.w > 0; });
     if (!scored.length)
       return cands.reduce(function(a,b){ return Math.abs(b-prev) < Math.abs(a-prev) ? b : a; });
@@ -593,29 +619,31 @@
   /* Every chord stands on its own root — the exercise is about the three
      voices above the bass, not about reading an inversion. */
   function makeBass(chords){
+    /* the roots are fixed, so the shape is carried by which octave each one
+       is written in — the line still rises and falls as a whole */
+    var aim = contour(chords.length, 18 + Math.floor(Math.random() * 3), 6);
     var line = [], prev = null;
-    chords.forEach(function(degree){
+    chords.forEach(function(degree, i){
       var letter = chordLetters(degree)[0];
       var step = prev == null
-        ? stepsFor(letter, 19, 25)[0]        /* seven steps: one octave, one candidate */
-        : nextInLine(prev, [letter], BASS_LO, BASS_HI, 5);
+        ? toneNear([letter], BASS_LO, BASS_HI, aim[0])
+        : nextInLine(prev, [letter], BASS_LO, BASS_HI, 5, aim[i]);
       line.push(step);
       prev = step;
     });
     return line;
   }
   function makeSoprano(chords){
+    var aim = contour(chords.length, 29 + Math.floor(Math.random() * 3), 6);
     var line = [], prev = null, prevDegree = null;
     chords.forEach(function(degree, i){
       var tones = chordLetters(degree), last = i === chords.length - 1, step;
       if (prev == null){
-        var open = [];                       /* an octave of room, so every tone is there */
-        tones.forEach(function(l){ open = open.concat(stepsFor(l, 31, 37)); });
-        step = pick(open);
+        step = toneNear(tones, SOP_LO, SOP_HI, aim[0]);
       } else if (prevDegree === 5 && prev % 7 === leadingLetter() && degree === 1){
         step = prev + 1;            /* a leading tone in the soprano has one move: up a step */
       } else {
-        step = nextInLine(prev, last ? [tones[0]] : tones, SOP_LO, SOP_HI, 4);
+        step = nextInLine(prev, last ? [tones[0]] : tones, SOP_LO, SOP_HI, 4, aim[i]);
       }
       line.push(step);
       prev = step; prevDegree = degree;
