@@ -309,7 +309,6 @@
         <svg id="staff" viewBox="0 0 640 256" aria-hidden="true"></svg>
       </div>
       <div class="toolbar">
-        <button type="button" id="btn-sound" aria-pressed="false">Sound</button>
         <button type="button" id="play">Play</button>
         <span class="spacer"></span>
         <button type="button" id="btn-clear" class="ghost">Clear notes</button>
@@ -856,7 +855,6 @@
   }
 
   /* ---------- staff state -------------------------------------------------- */
-  var soundOn = false;                     /* off until asked for; Play turns it on */
   var hover = null, hoverNear = false, drag = null, press = null, cursor = null;
   var keyboard = false, lastClick = null;
 
@@ -1417,7 +1415,6 @@
     });
   }
   function play(slot, step){
-    if (!soundOn) return;
     var ctx = audio();
     if (!ctx) return;
     var midi = midiAt(slot, step), t = ctx.currentTime;
@@ -1450,8 +1447,7 @@
 
   /* ---------- playback ----------------------------------------------------
      Each chord in turn, its four voices together, with the column lit while
-     it sounds. Pressing Play turns the sound on if it was off, rather than
-     playing to silence. */
+     it sounds. */
   var CHORD_MS = 1150, playTimer = null, ringTimer = null, playingSlot = null;
   function stopPlayback(){
     if (playTimer){ clearTimeout(playTimer); playTimer = null; }
@@ -1467,10 +1463,6 @@
     var notes = notesIn(slot);
     if (!notes.length) return;
     if (playTimer) stopPlayback();
-    if (!soundOn){
-      soundOn = true;
-      btnSound.setAttribute("aria-pressed", "true");
-    }
     audio();
     notes.forEach(function(n){ play(slot, n.step); });
     playingSlot = slot;
@@ -1481,10 +1473,6 @@
   function playProgression(){
     if (playTimer){ stopPlayback(); return; }
     if (ringTimer){ clearTimeout(ringTimer); ringTimer = null; playingSlot = null; }
-    if (!soundOn){
-      soundOn = true;
-      btnSound.setAttribute("aria-pressed", "true");
-    }
     audio();
     playBtn.textContent = "Stop";
     var slot = 0;
@@ -1864,11 +1852,6 @@
   });
 
   /* ---------- toolbar --------------------------------------------------------- */
-  var btnSound = document.getElementById("btn-sound");
-  btnSound.addEventListener("click", function(){
-    soundOn = !soundOn;
-    btnSound.setAttribute("aria-pressed", String(soundOn));
-  });
   document.getElementById("btn-clear").addEventListener("click", function(){ clearNotes(); });
 
   drawSetup();
