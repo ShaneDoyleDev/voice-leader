@@ -701,49 +701,51 @@
     })();
   }
 
-  /* Checking the voicing draws it: a faint line from each voice of one chord
-     to the same voice in the next, chord by chord across the progression.
-     The lines belong to the report, so editing a note takes them away with
-     it. The stroke fills in against the clock rather than by a CSS
-     animation, since every render rebuilds these and a CSS one would start
-     over on each. */
+  /* Checking the voicing draws the parallels it finds: a red line along each
+     of the two voices that moved in lockstep, from one chord to the next.
+     Nothing else is drawn — a clean progression shows no lines at all. The
+     stroke fills in against the clock rather than by a CSS animation, since
+     every render rebuilds these and a CSS one would start over on each. */
   var FLOW_MS = 420, FLOW_STAGGER = 110, flowAt = null, flowFrame = null;
-  function inParallel(move, voice){
-    if (!report || !report.parallels) return false;
-    for (var i = 0; i < report.parallels.length; i++){
-      var p = report.parallels[i];
-      if (p.move === move && (p.lo === voice || p.hi === voice)) return true;
-    }
-    return false;
+  function parallelVoicesAt(move){
+    var voices = [];
+    if (!report || !report.parallels) return voices;
+    report.parallels.forEach(function(p){
+      if (p.move !== move) return;
+      if (voices.indexOf(p.lo) < 0) voices.push(p.lo);
+      if (voices.indexOf(p.hi) < 0) voices.push(p.hi);
+    });
+    return voices;
   }
   function drawFlow(){
     while (layerFlow.firstChild) layerFlow.removeChild(layerFlow.firstChild);
     if (!report || flowAt == null) return;
     var rows = chordVoices();
     if (!rows) return;
-    var now = performance.now(), running = false, half = glyphW("noteheadBlack", S) / 2, i, v;
+    var now = performance.now(), running = false, half = glyphW("noteheadBlack", S) / 2;
+    var shown = 0, i, v, voices;
     for (i = 0; i + 1 < rows.length; i++){
       var a = rows[i], b = rows[i + 1];
       if (!a || !b) continue;
-      var t = (now - (flowAt + i * FLOW_STAGGER)) / FLOW_MS;
+      voices = parallelVoicesAt(i);
+      if (!voices.length) continue;
+      var t = (now - (flowAt + shown * FLOW_STAGGER)) / FLOW_MS;
+      shown++;
       if (t <= 0){ running = true; continue; }        /* its turn has not come yet */
       t = Math.min(1, t);
       if (t < 1) running = true;
       var ease = 1 - Math.pow(1 - t, 3);
-      for (v = 0; v < MAX_VOICES; v++){
-        var x1 = SLOT_X[i] + half + 3, y1 = yOf(a[v].step, a[v].staff);
-        var x2 = SLOT_X[i + 1] - half - 3, y2 = yOf(b[v].step, b[v].staff);
+      voices.forEach(function(voice){
+        var x1 = SLOT_X[i] + half + 3, y1 = yOf(a[voice].step, a[voice].staff);
+        var x2 = SLOT_X[i + 1] - half - 3, y2 = yOf(b[voice].step, b[voice].staff);
         var len = Math.hypot(x2 - x1, y2 - y1);
-        var lockstep = inParallel(i, v);      /* one of the two voices the check caught */
         layerFlow.appendChild(el("line",{
           x1:x1, y1:y1, x2:x2, y2:y2,
-          stroke: lockstep ? "var(--wrong)" : "var(--accent)",
-          "stroke-width": lockstep ? 1.8 : 1.2, "stroke-linecap":"round",
-          opacity: lockstep ? 0.92 : 0.32,
+          stroke:"var(--wrong)", "stroke-width":1.8, "stroke-linecap":"round", opacity:0.92,
           "stroke-dasharray":len.toFixed(2),
           "stroke-dashoffset":(len * (1 - ease)).toFixed(2)
         }));
-      }
+      });
     }
     if (running && !flowFrame)
       flowFrame = requestAnimationFrame(function(){ flowFrame = null; render(); });
