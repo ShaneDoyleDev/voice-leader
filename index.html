@@ -250,12 +250,6 @@
     color:var(--ink-soft); letter-spacing:.08em; margin-right:3px; vertical-align:.32em;
   }
   .empty{margin:0;color:var(--ink-soft);font-style:italic}
-  .hint{margin:0;font-size:13px;color:var(--ink-soft)}
-  kbd{
-    font:500 11px/1 "IBM Plex Sans",sans-serif;
-    border:1px solid var(--line); border-bottom-width:2px;
-    border-radius:3px; padding:2px 5px; background:var(--chip);
-  }
   @media (prefers-reduced-motion: no-preference){ #ghost{transition:opacity .12s ease} }
 </style>
 </head>
@@ -327,8 +321,6 @@
     <div class="readout" style="margin-top:20px">
       <h2>On the staff</h2>
       <ul class="chips" id="chips" aria-live="polite"></ul>
-      <p class="hint">Click a line or a space to place a note, drag it to move it, double-click it to take it off.</p>
-      <p class="hint">Keyboard: <kbd>Tab</kbd> to the staff, <kbd>←</kbd> <kbd>→</kbd> for chord, <kbd>↑</kbd> <kbd>↓</kbd> for pitch, <kbd>Enter</kbd> to place or remove.</p>
     </div>
   </section>
 </div>
@@ -635,7 +627,7 @@
       state.notes.forEach(function(n){
         if (n.slot === i) count[n.step % 7] = (count[n.step % 7] || 0) + 1;
       });
-      var complete = tones.every(function(l){ return count[l] > 0; });
+      var complete = count[tones[0]] > 0 && count[tones[1]] > 0;   /* fifth optional */
 
       var t = el("text",{x:SLOT_X[i], y:228, fill: complete ? "var(--accent)" : "var(--ink)",
                          "text-anchor":"middle", "font-family":"Spectral, Georgia, serif",
@@ -1026,7 +1018,11 @@
      of the chord, all three tones present — its notes are named top down:
      soprano, alto, tenor, bass. Read fresh on every render, so moving a note
      renames whatever it has become. */
-  /* four voices, every one a tone of the chord, all three tones present */
+  /* Four voices, every one a tone of the chord, with the root and the third
+     both there. The fifth may be left out — four parts will not always hold
+     three tones and a sensible doubling, and dropping the fifth is the usual
+     way out. The root and the third are what name the chord, so neither can
+     go. */
   function chordIsClean(slot){
     if (slot >= state.chords.length || slotCount(slot) !== MAX_VOICES) return false;
     var notes = notesIn(slot), tones = chordLetters(state.chords[slot]), seen = {}, i, letter;
@@ -1035,8 +1031,7 @@
       if (tones.indexOf(letter) === -1) return false;          /* a note outside the chord */
       seen[letter] = true;
     }
-    for (i = 0; i < tones.length; i++) if (!seen[tones[i]]) return false;  /* a tone missing */
-    return true;
+    return !!(seen[tones[0]] && seen[tones[1]]);               /* root and third */
   }
   function firstChordVoices(){
     return chordIsClean(0) ? voicesOf(0) : null;               /* bass first */
@@ -1177,10 +1172,17 @@
       var add = block([slot], spell(degree));
       v.forEach(function(n){ counts[n.letter] = (counts[n.letter] || 0) + 1; });
 
-      /* completeness */
+      /* completeness — the fifth is the one tone that may be left out */
       tones.forEach(function(l, idx){
-        if (!counts[l])
+        if (counts[l]) return;
+        if (idx < 2){
           add("error", "Missing its " + ROLES[idx] + ", " + letterText(degree, l) + ".");
+        } else if (counts[tones[0]] > 2){
+          add("ok", "No fifth, root tripled \u2014 the usual way to leave it out.");
+        } else {
+          add("caution", "No fifth, and the root is not tripled \u2014 when the fifth goes, " +
+              "the root normally takes its place.");
+        }
       });
 
       /* doubling, and the third as the weaker double */
