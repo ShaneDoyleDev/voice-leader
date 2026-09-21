@@ -202,8 +202,12 @@
     text-transform:uppercase; color:var(--ink-soft);
   }
   .verdict{margin:0;font-family:"Spectral",Georgia,serif;font-size:19px;color:var(--ink)}
-  .findings{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px}
-  .block{display:grid;grid-template-columns:auto 1fr;gap:2px 14px;align-items:baseline}
+  .findings{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+  .block{
+    display:grid; grid-template-columns:auto 1fr; gap:2px 14px; align-items:baseline;
+    padding:9px 12px; border-radius:3px;
+  }
+  .findings > li:nth-child(even){background:var(--chip)}   /* banded, for the eye */
   .block > b{
     font-family:"Spectral",Georgia,serif; font-size:17px;
     color:var(--ink); letter-spacing:.04em; white-space:nowrap;
@@ -219,6 +223,7 @@
     width:7px; height:7px; border-radius:50%;
   }
   .block li.error{color:var(--ink)}
+  .block li b{color:var(--ink);font-weight:600}   /* the interval itself */
   .block li.error::before{background:var(--wrong)}
   .block li.caution::before{background:var(--accent)}
   .block li.ok::before{background:var(--good)}
@@ -714,6 +719,38 @@
       nextFrame(frame);
     })();
   }
+  /* Notes taken off drift up and fade rather than vanishing. They are gone
+     from the staff the moment they are cleared; what rises is only their
+     likeness. */
+  var FADE_MS = 430, fading = null, fadeGen = 0;
+  function clearNotes(slot){
+    var going = state.notes.filter(function(n){ return slot == null || n.slot === slot; });
+    if (!going.length) return;
+    state.notes = state.notes.filter(function(n){ return !(slot == null || n.slot === slot); });
+    if (!reducedMotion()){
+      fading = { notes:going, at:performance.now() };
+      var gen = ++fadeGen;
+      (function frame(){
+        if (gen !== fadeGen || !fading) return;
+        if (performance.now() - fading.at >= FADE_MS){ fading = null; render(); return; }
+        render();
+        nextFrame(frame);
+      })();
+    }
+    render();
+  }
+  function drawFading(){
+    if (!fading) return;
+    var t = Math.min(1, (performance.now() - fading.at) / FADE_MS);
+    var ease = 1 - Math.pow(1 - t, 2);
+    fading.notes.forEach(function(n){
+      if (SLOT_X[n.slot] == null) return;
+      var g = noteGroup(n, {color:"var(--ink)", label:false, pop:false, opacity:(1 - ease).toFixed(3)});
+      g.setAttribute("transform", "translate(0," + (-13 * ease).toFixed(2) + ")");
+      layerGhost.appendChild(g);
+    });
+  }
+
   /* a thin ring that widens off the new notehead and fades as it goes */
   function drawRipple(){
     if (!popping || SLOT_X[popping.slot] == null) return;
@@ -810,7 +847,7 @@
 
   /* ---------- staff state -------------------------------------------------- */
   var showNames = false, soundOn = false;   /* off until asked for; Play turns it on */
-  var hover = null, drag = null, press = null, cursor = null, keyboard = false, lastClick = null, clearArmed = null;
+  var hover = null, drag = null, press = null, cursor = null, keyboard = false, lastClick = null;
 
   var MAX_VOICES = 4;                      /* one chord, four voices */
   /* a placed note that is not one of the chord's three tones draws in red */
@@ -852,26 +889,22 @@
     else if (focus && indexAt(focus.slot, focus.step) === -1 && !slotFull(focus.slot))
       layerGhost.appendChild(noteGroup(focus,{color:"var(--accent)",label:showNames,opacity:0.55,pop:false}));
 
-    /* A full chord says so above its column. Click that and it turns into a
-       cross; click the cross and the chord is emptied. */
-    var cueSlot = clearArmed != null ? clearArmed
-                : (focus && !drag && slotFull(focus.slot) ? focus.slot : null);
+    /* A full chord takes no more notes; a cross over its column clears it. */
+    var cueSlot = (focus && !drag && slotFull(focus.slot)) ? focus.slot : null;
     if (cueSlot != null && SLOT_X[cueSlot] != null){
-      var armed = clearArmed === cueSlot;
-      var cue = el("text",{x:SLOT_X[cueSlot], y: armed ? 55 : 52, "text-anchor":"middle",
-                           "font-size": armed ? 14 : 8.5,
-                           fill: armed ? "var(--wrong)" : "var(--ink-soft)",
-                           "font-family":"IBM Plex Sans, sans-serif"});
+      var cue = el("text",{x:SLOT_X[cueSlot], y:55, "text-anchor":"middle", "font-size":14,
+                           fill:"var(--wrong)", "font-family":"IBM Plex Sans, sans-serif"});
       var hint = el("title",{});
-      hint.textContent = armed ? "Clear this chord" : "Four voices — click to clear this chord";
+      hint.textContent = "Clear this chord";
       cue.appendChild(hint);
-      cue.appendChild(document.createTextNode(armed ? "\u2715" : "4 voices"));
+      cue.appendChild(document.createTextNode("\u2715"));
       layerGhost.appendChild(cue);
     }
     updateVoices();
     drawLabels();
     drawFlow();
     drawRipple();
+    drawFading();
     renderChips();
     if (report && reportKey !== notesKey()) report = null;   /* edited since — stale */
     if (!report) flowAt = null;
@@ -1083,8 +1116,8 @@
     function block(label, sub){
       var b = { label:label, sub:sub || "", items:[] };
       report.blocks.push(b);
-      return function(level, text){
-        b.items.push({ level:level, text:text });
+      return function(level, text, strong){
+        b.items.push({ level:level, text:text, strong:strong });
         if (level === "error") report.errors++;
         else if (level === "caution") report.cautions++;
       };
@@ -1136,7 +1169,8 @@
           add("error", VOICES[pair[0]] + " and " + VOICES[pair[1]] + " are " +
               (named ? withArticle(named) : gap + " semitones") + " apart \u2014 " +
               lo.name + " to " + hi.name + ", " + gap +
-              " semitones \u2014 keep adjacent upper voices within an octave.");
+              " semitones \u2014 keep adjacent upper voices within an octave.",
+              named || (gap + " semitones"));
         });
       }
     });
@@ -1159,7 +1193,8 @@
           if (dLo === 0 || dLo !== dHi) continue;
           add("error", "Parallel " + (before === 7 ? "fifths" : "octaves") + ": " +
               VOICES[lo] + " and " + VOICES[hi] + " move " + a[lo].name + "\u2013" + a[hi].name +
-              " to " + b[lo].name + "\u2013" + b[hi].name + ".");
+              " to " + b[lo].name + "\u2013" + b[hi].name + ".",
+              "Parallel " + (before === 7 ? "fifths" : "octaves"));
           report.parallels.push({ move:i, lo:lo, hi:hi });
         }
       }
@@ -1231,7 +1266,15 @@
       b.items.forEach(function(item){
         var row = document.createElement("li");
         row.className = item.level;
-        row.textContent = item.text;
+        var cut = item.strong ? item.text.indexOf(item.strong) : -1;
+        if (cut < 0) row.textContent = item.text;
+        else {
+          var strong = document.createElement("b");
+          strong.textContent = item.strong;
+          row.appendChild(document.createTextNode(item.text.slice(0, cut)));
+          row.appendChild(strong);
+          row.appendChild(document.createTextNode(item.text.slice(cut + item.strong.length)));
+        }
         ul.appendChild(row);
       });
       li.appendChild(label); li.appendChild(ul);
@@ -1391,7 +1434,6 @@
       return;
     }
     keyboard = false;
-    if (clearArmed != null && cueHit(p) !== clearArmed && slotAt(p.x) !== clearArmed) clearArmed = null;
     var t2 = targetAt(p);
     if (!hover || hover.slot !== t2.slot || hover.step !== t2.step || hover.staff !== t2.staff){
       hover = t2;
@@ -1427,11 +1469,8 @@
     press = null;
     var cue = cueHit(p);
     if (cue != null && !drag){
-      if (clearArmed === cue){
-        state.notes = state.notes.filter(function(n){ return n.slot !== cue; });
-        clearArmed = null;
-      } else clearArmed = cue;
       hover = null; lastClick = null;
+      clearNotes(cue);                 /* the same drift as Clear notes */
       setCursor(p); render(); return;
     }
     if (drag){
@@ -1714,10 +1753,7 @@
     soundOn = !soundOn;
     btnSound.setAttribute("aria-pressed", String(soundOn));
   });
-  document.getElementById("btn-clear").addEventListener("click", function(){
-    state.notes = [];
-    render();
-  });
+  document.getElementById("btn-clear").addEventListener("click", function(){ clearNotes(); });
 
   drawSetup();
 })();
