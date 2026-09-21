@@ -1021,10 +1021,9 @@
       })
       .sort(function(a, b){ return a.midi - b.midi; });
   }
-  /* Once the opening chord is complete — four voices, every one of them a
-     tone of the chord, all three tones present — its notes are named top
-     down: soprano, alto, tenor, bass. Read fresh on every render, so moving
-     a note renames whatever it has become. */
+  /* The opening chord's notes are named top down: soprano, alto, tenor,
+     bass. Read fresh on every render, so moving a note renames whatever it
+     has become. */
   /* four voices, every one a tone of the chord, all three tones present */
   function chordIsClean(slot){
     if (slot >= state.chords.length || slotCount(slot) !== MAX_VOICES) return false;
@@ -1037,8 +1036,12 @@
     for (i = 0; i < tones.length; i++) if (!seen[tones[i]]) return false;  /* a tone missing */
     return true;
   }
+  /* Voices are fixed as soon as the opening chord has its four notes, right
+     or wrong — naming them is what lets you see which voice holds the wrong
+     note. The figure over the numeral is stricter; that one waits for the
+     chord to be correct. */
   function firstChordVoices(){
-    return chordIsClean(0) ? voicesOf(0) : null;               /* bass first */
+    return (state.chords.length && slotCount(0) === MAX_VOICES) ? voicesOf(0) : null;
   }
   /* The opening chord fixes the voices. Every later chord's four notes are
      then matched to those same four lines by the assignment that moves them
