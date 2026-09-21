@@ -925,8 +925,10 @@
     if (!state.notes.length && playTimer) stopPlayback();
     checkHint.textContent = ready
       ? "Doubling, spacing, crossing, the leading tone and parallels."
-      : "Every chord needs its own tones \u2014 three notes or four, none of them foreign \u2014 " +
-        "before the checklist can run.";
+      : (state.chords.length && slotCount(0) < MAX_VOICES)
+        ? "The opening chord needs all four voices \u2014 it names them for the rest."
+        : "Every chord needs its own tones \u2014 three notes or four, none of them foreign \u2014 " +
+          "before the checklist can run.";
   }
 
   var chips = document.getElementById("chips");
@@ -1152,10 +1154,12 @@
     var fig = inversionOf(slot);
     if (fig) node.appendChild(figureNode(fig));
   }
-  /* the checklist is about voice leading, so it waits until every chord is a
-     chord: its own tones, nothing foreign, nothing missing */
+  /* The checklist is about voice leading, so it waits until every chord is a
+     chord: its own tones, nothing foreign, nothing missing. The opening
+     chord is held to four notes whatever else it has, since it is the chord
+     that names the voices the rest are read against. */
   function allVoiced(){
-    if (!state.chords.length) return false;
+    if (!state.chords.length || slotCount(0) !== MAX_VOICES) return false;
     for (var i = 0; i < state.chords.length; i++) if (!chordIsClean(i)) return false;
     return true;
   }
