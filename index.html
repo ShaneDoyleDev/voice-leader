@@ -164,7 +164,7 @@
 
   .start{
     display:flex; flex-wrap:wrap; align-items:center; gap:12px;
-    padding:16px 18px;
+    padding:16px 18px; border-bottom:1px solid var(--line);
   }
   .start button.go{
     background:var(--ink); color:var(--surface); border-color:var(--ink);
@@ -326,8 +326,13 @@
       </div>
     </div>
 
+    <div class="start">
+      <button type="button" class="go" id="begin">Begin voicing</button>
+      <p id="startnote"></p>
+    </div>
+
     <div class="field">
-      <h2>Or take a drill</h2>
+      <h2>Exercises</h2>
       <div class="drills">
         <button type="button" id="drill-bass">Figured bass
           <small>A bass line is written for you — add the tenor, alto and soprano above it.</small></button>
@@ -336,11 +341,6 @@
       </div>
       <p class="keyline">The key and the progression come with it. The given voice is fixed on the
         staff; everything else is yours to write, and the checklist grades it the same way.</p>
-    </div>
-
-    <div class="start">
-      <button type="button" class="go" id="begin">Begin voicing</button>
-      <p id="startnote"></p>
     </div>
   </section>
 
