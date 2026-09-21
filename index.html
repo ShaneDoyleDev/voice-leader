@@ -126,6 +126,21 @@
     color:var(--ink-soft); letter-spacing:.02em;
   }
 
+  .drills{display:flex;flex-wrap:wrap;gap:8px}
+  .drills button{
+    flex:1 1 220px; text-align:left;
+    font:500 14px/1.1 "Spectral",Georgia,serif; padding:11px 14px;
+  }
+  .drills button small{
+    display:block; margin-top:4px;
+    font:400 11px/1.35 "IBM Plex Sans",sans-serif; color:var(--ink-soft);
+  }
+  .task{                                 /* what a drill is asking for */
+    margin:0; padding:11px 14px; border-bottom:1px solid var(--line);
+    font-size:13px; color:var(--ink-soft);
+  }
+  .task b{color:var(--ink);font-weight:600}
+
   .seq{
     display:flex; flex-wrap:wrap; align-items:stretch; gap:6px;
     min-height:62px; padding:8px;
@@ -311,6 +326,18 @@
       </div>
     </div>
 
+    <div class="field">
+      <h2>Or take a drill</h2>
+      <div class="drills">
+        <button type="button" id="drill-bass">Figured bass
+          <small>A bass line is written for you — add the tenor, alto and soprano above it.</small></button>
+        <button type="button" id="drill-sop">Harmonise a melody
+          <small>A soprano line is written for you — set the alto, tenor and bass under it.</small></button>
+      </div>
+      <p class="keyline">The key and the progression come with it. The given voice is fixed on the
+        staff; everything else is yours to write, and the checklist grades it the same way.</p>
+    </div>
+
     <div class="start">
       <button type="button" class="go" id="begin">Begin voicing</button>
       <p id="startnote"></p>
@@ -323,10 +350,12 @@
       <h2 id="stagekey"></h2>
       <span class="prog" id="stageprog"></span>
       <span class="spacer"></span>
+      <button type="button" class="ghost" id="again" hidden>Another drill</button>
       <button type="button" class="ghost" id="edit">Change key or progression</button>
     </div>
 
     <div class="panel" style="margin-top:12px">
+      <p class="task" id="stagetask" hidden></p>
       <div class="staffwrap" id="staffwrap" tabindex="0" role="application"
            aria-label="Grand staff. Arrow keys move the cursor, Enter places or removes a note.">
         <svg id="staff" viewBox="0 0 640 256" aria-hidden="true"></svg>
@@ -421,7 +450,7 @@
   }
 
   /* ---------- key and chords --------------------------------------------- */
-  var state = { mode:"major", tonic:"C", chords:[1,4,5,1], notes:[], live:"" };
+  var state = { mode:"major", tonic:"C", chords:[1,4,5,1], notes:[], live:"", drill:null };
 
   function keyAcc(){
     var list = KEYS[state.mode], i;
@@ -513,6 +542,88 @@
     var l = step % 7, base = keyAlters()[l], a = alterFor(state.chords[slot], l);
     if (a === base) return null;
     return a === 0 ? "natural" : a === 1 ? "sharp" : a === 2 ? "dblsharp" : "flat";
+  }
+
+  /* ---------- drills ------------------------------------------------------
+     A drill writes one voice for you and asks for the other three, the way
+     four-part writing is actually taught. Nothing downstream changes: a
+     generated bass figures its own chords through inversionOf(), and the
+     checklist grades the answer exactly as it grades free voicing. */
+  function pick(list){ return list[Math.floor(Math.random() * list.length)]; }
+  /* where each degree usually goes next — no degree repeats itself, and the
+     progression is closed with V–I so there is a cadence to write into */
+  var NEXT = { 1:[2,3,4,5,6], 2:[5,7], 3:[4,6], 4:[1,2,5], 5:[1,6], 6:[2,4,5], 7:[1] };
+  function makeProgression(){
+    var len = 5 + Math.floor(Math.random() * 2), out = [1];
+    while (out.length < len - 2) out.push(pick(NEXT[out[out.length - 1]]));
+    if (out[out.length - 1] !== 5) out.push(5);
+    out.push(1);
+    return out;
+  }
+  function makeKey(){
+    var mode = Math.random() < 0.6 ? "major" : "minor";
+    var plain = KEYS[mode].filter(function(k){ return Math.abs(k[1]) <= 4; });
+    return { mode:mode, tonic:pick(plain)[0] };
+  }
+  function stepsFor(letter, lo, hi){
+    var out = [], step;
+    for (step = lo; step <= hi; step++) if (step % 7 === letter) out.push(step);
+    return out;
+  }
+  /* the next note of a written line: a step or two is likeliest, a leap
+     beyond a sixth never happens, and a repeat is allowed but rare */
+  function nextInLine(prev, letters, lo, hi, leap){
+    var cands = [];
+    letters.forEach(function(l){ cands = cands.concat(stepsFor(l, lo, hi)); });
+    if (!cands.length) return prev;
+    var scored = cands.map(function(step){
+      var d = Math.abs(step - prev);
+      return { step:step, w: d === 0 ? 0.5 : d <= 2 ? 3 : d <= 4 ? 1.3 : d <= leap ? 0.4 : 0 };
+    }).filter(function(c){ return c.w > 0; });
+    if (!scored.length)
+      return cands.reduce(function(a,b){ return Math.abs(b-prev) < Math.abs(a-prev) ? b : a; });
+    var total = scored.reduce(function(t,c){ return t + c.w; }, 0), r = Math.random() * total, i;
+    for (i = 0; i < scored.length; i++){ r -= scored[i].w; if (r <= 0) return scored[i].step; }
+    return scored[scored.length - 1].step;
+  }
+  var BASS_LO = 17, BASS_HI = 28;        /* F2 to C4 — the bass voice’s working range */
+  /* C4 to F5 — a step short of the soprano’s top, so a leading tone always
+     has the one note above it that it is obliged to rise to */
+  var SOP_LO  = 28, SOP_HI  = 38;
+  function makeBass(chords){
+    var line = [], prev = null;
+    chords.forEach(function(degree, i){
+      var tones = chordLetters(degree), last = i === chords.length - 1, letter;
+      /* the ends stand on their root; a diminished triad never does, so it
+         takes the first inversion it is nearly always written in */
+      if (quality(degree) === "dim") letter = tones[1];
+      else if (i === 0 || last) letter = tones[0];
+      else letter = Math.random() < 0.3 ? tones[1] : tones[0];
+      var step = prev == null
+        ? stepsFor(letter, 19, 25)[0]        /* seven steps: one octave, one candidate */
+        : nextInLine(prev, [letter], BASS_LO, BASS_HI, 5);
+      line.push(step);
+      prev = step;
+    });
+    return line;
+  }
+  function makeSoprano(chords){
+    var line = [], prev = null, prevDegree = null;
+    chords.forEach(function(degree, i){
+      var tones = chordLetters(degree), last = i === chords.length - 1, step;
+      if (prev == null){
+        var open = [];                       /* an octave of room, so every tone is there */
+        tones.forEach(function(l){ open = open.concat(stepsFor(l, 31, 37)); });
+        step = pick(open);
+      } else if (prevDegree === 5 && prev % 7 === leadingLetter() && degree === 1){
+        step = prev + 1;            /* a leading tone in the soprano has one move: up a step */
+      } else {
+        step = nextInLine(prev, last ? [tones[0]] : tones, SOP_LO, SOP_HI, 4);
+      }
+      line.push(step);
+      prev = step; prevDegree = degree;
+    });
+    return line;
   }
 
   /* horizontal position of each chord, cleared of the key signature */
@@ -766,9 +877,12 @@
      likeness. */
   var FADE_MS = 430, fading = null, fadeGen = 0;
   function clearNotes(slot){
-    var going = state.notes.filter(function(n){ return slot == null || n.slot === slot; });
+    /* a drill's given voice stays put; clearing is for what you wrote */
+    var going = state.notes.filter(function(n){
+      return !n.given && (slot == null || n.slot === slot);
+    });
     if (!going.length) return;
-    state.notes = state.notes.filter(function(n){ return !(slot == null || n.slot === slot); });
+    state.notes = state.notes.filter(function(n){ return going.indexOf(n) === -1; });
     if (!reducedMotion()){
       fading = { notes:going, at:performance.now() };
       var gen = ++fadeGen;
@@ -915,7 +1029,7 @@
     state.notes.forEach(function(n,i){
       if (drag && drag.note === n) return;
       layerNotes.appendChild(noteGroup(n,{
-        color: isChordTone(n) ? "var(--ink)" : "var(--wrong)"
+        color: n.given ? "var(--rule)" : isChordTone(n) ? "var(--ink)" : "var(--wrong)"
       }));
     });
     if (drag) layerGhost.appendChild(noteGroup(drag.note,{color:"var(--accent)",pop:false}));
@@ -1550,10 +1664,16 @@
     var t = targetAt(p);
     return indexAt(t.slot, t.step);
   }
+  /* a given note answers to nothing: it cannot be grabbed, dragged or
+     double-clicked away, and a click on it places nothing either */
+  function hitFree(p){
+    var i = hitNote(p);
+    return (i > -1 && state.notes[i].given) ? -1 : i;
+  }
 
   function setCursor(p){
     svg.style.cursor = drag ? "grabbing"
-      : hitNote(p) > -1 ? "grab"          /* a note there answers first: pressing it drags */
+      : hitNote(p) > -1 ? (hitFree(p) > -1 ? "grab" : "default")   /* a note answers first */
       : cueHit(p) != null ? "pointer" : "crosshair";
   }
 
@@ -1598,7 +1718,7 @@
      than by element, and only when neither of them was a drag. */
   var DOUBLE_MS = 450;
   svg.addEventListener("pointerdown", function(e){
-    var p = local(e), hit = hitNote(p);
+    var p = local(e), hit = hitFree(p);
     svg.setPointerCapture(e.pointerId);
     press = { id:e.pointerId, x:p.x, y:p.y };
     if (hit > -1){ drag = { note:state.notes[hit], moved:false }; setCursor(p); render(); }
@@ -1673,6 +1793,7 @@
       case "ArrowRight": cursor.slot = clamp(cursor.slot + 1, 0, state.chords.length - 1); break;
       case "Enter": case " ":
         i = indexAt(cursor.slot, cursor.step);
+        if (i > -1 && state.notes[i].given) break;      /* not yours to take off */
         if (i > -1) state.notes.splice(i, 1);
         else if (!slotFull(cursor.slot)){
           state.notes.push({slot:cursor.slot, step:cursor.step, staff:cursor.staff});
@@ -1681,7 +1802,7 @@
         break;
       case "Backspace": case "Delete":
         i = indexAt(cursor.slot, cursor.step);
-        if (i > -1) state.notes.splice(i, 1);
+        if (i > -1 && !state.notes[i].given) state.notes.splice(i, 1);
         break;
       default: handled = false;
     }
@@ -1866,19 +1987,51 @@
   document.getElementById("undo").addEventListener("click", function(){ state.chords.pop(); drawSetup(); });
   document.getElementById("clearprog").addEventListener("click", function(){ state.chords = []; drawSetup(); });
 
-  begin.addEventListener("click", function(){
-    var sig = state.mode + "|" + state.tonic + "|" + state.chords.join(",");
-    if (sig !== state.live){ state.notes = []; state.live = sig; }   /* a changed setup starts clean */
+  var TASK = {
+    bass:"<b>The bass is given.</b> Write the tenor, alto and soprano above it. Each numeral " +
+         "takes its figure from that bass note once its chord is right.",
+    soprano:"<b>The soprano is given.</b> Harmonise it \u2014 alto, tenor and bass under each " +
+            "note. The figures follow whatever bass you write."
+  };
+  function enterStage(){
     SLOT_X = layoutSlots();
+    stopPlayback();
+    state.live = state.mode + "|" + state.tonic + "|" + state.chords.join(",");
     cursor = { slot:0, step:30, staff:"treble" };
     document.getElementById("stagekey").textContent = keyName();
     document.getElementById("stageprog").textContent = state.chords.map(numeralOf).join(" – ");
+    var task = document.getElementById("stagetask");
+    task.hidden = !state.drill;
+    if (state.drill) task.innerHTML = TASK[state.drill];
+    document.getElementById("again").hidden = !state.drill;
     audio();                 /* decode the samples while the staff is drawn */
     setup.hidden = true;
     stage.hidden = false;
     drawStaff();
     render();
     wrap.focus({preventScroll:true});
+  }
+  /* A drill: a key, a progression and one voice already on the staff. */
+  function startDrill(kind){
+    var key = makeKey();
+    state.mode = key.mode;
+    state.tonic = key.tonic;
+    state.chords = makeProgression();
+    state.drill = kind;
+    var line = kind === "bass" ? makeBass(state.chords) : makeSoprano(state.chords);
+    state.notes = line.map(function(step, slot){
+      return { slot:slot, step:step, staff:(kind === "bass" ? "bass" : "treble"), given:true };
+    });
+    enterStage();
+  }
+  document.getElementById("drill-bass").addEventListener("click", function(){ startDrill("bass"); });
+  document.getElementById("drill-sop").addEventListener("click", function(){ startDrill("soprano"); });
+  document.getElementById("again").addEventListener("click", function(){ startDrill(state.drill); });
+
+  begin.addEventListener("click", function(){
+    var sig = state.mode + "|" + state.tonic + "|" + state.chords.join(",");
+    if (sig !== state.live){ state.notes = []; state.drill = null; }   /* a changed setup starts clean */
+    enterStage();
   });
   document.getElementById("edit").addEventListener("click", function(){
     stopPlayback();
