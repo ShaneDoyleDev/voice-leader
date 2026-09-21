@@ -233,6 +233,11 @@
   }
   .chip b{font:500 13px/1 "Spectral",Georgia,serif;color:var(--accent);letter-spacing:.04em}
   .chip span{font-family:"Spectral",Georgia,serif;font-size:15px;letter-spacing:.02em}
+  .chip .voiced + .voiced{margin-left:9px}
+  .chip .voiced i{
+    font:600 9px/1 "IBM Plex Sans",sans-serif; font-style:normal;
+    color:var(--ink-soft); letter-spacing:.08em; margin-right:3px; vertical-align:.32em;
+  }
   .empty{margin:0;color:var(--ink-soft);font-style:italic}
   .hint{margin:0;font-size:13px;color:var(--ink-soft)}
   kbd{
@@ -652,7 +657,6 @@
 
     var rows = chordVoices();
     if (rows){
-      var SHORT = ["B", "T", "A", "S"], LONG = ["Bass", "Tenor", "Alto", "Soprano"];
       rows.forEach(function(row, slot){
         if (!row) return;
         row.forEach(function(n, voice){
@@ -660,9 +664,9 @@
                              "font-family":"IBM Plex Sans, sans-serif", "font-size":10,
                              "font-weight":600, "letter-spacing":"0.06em", fill:"var(--ink-soft)"});
           var title = el("title",{});
-          title.textContent = LONG[voice];
+          title.textContent = VOICES[voice];
           t.appendChild(title);
-          t.appendChild(document.createTextNode(SHORT[voice]));
+          t.appendChild(document.createTextNode(VOICE_SHORT[voice]));
           layerLabels.appendChild(t);
         });
       });
@@ -795,6 +799,7 @@
   });
   function renderChips(){
     chips.innerHTML = "";
+    var rows = chordVoices();
     var bySlot = {}, any = false;
     state.notes.forEach(function(n){ (bySlot[n.slot] = bySlot[n.slot] || []).push(n); any = true; });
     if (!any){
@@ -810,9 +815,23 @@
       var b = document.createElement("b");
       b.textContent = numeralOf(state.chords[slot]);
       var s = document.createElement("span");
-      s.textContent = bySlot[slot].map(function(n){ return n.step; })
-        .sort(function(a,b){return a-b;})
-        .map(function(step){ return nameAt(slot, step); }).join("  ");
+      var row = rows && rows[slot];
+      if (row){
+        row.forEach(function(n, voice){          /* bass up, so a crossing reads plainly */
+          var part = document.createElement("span");
+          part.className = "voiced";
+          var tag = document.createElement("i");
+          tag.textContent = VOICE_SHORT[voice];
+          tag.title = VOICES[voice];
+          part.appendChild(tag);
+          part.appendChild(document.createTextNode(n.name));
+          s.appendChild(part);
+        });
+      } else {
+        s.textContent = bySlot[slot].map(function(n){ return n.step; })
+          .sort(function(a,b){return a-b;})
+          .map(function(step){ return nameAt(slot, step); }).join("  ");
+      }
       li.appendChild(b); li.appendChild(s);
       chips.appendChild(li);
     });
@@ -824,6 +843,7 @@
      Soprano. That assumes the voices do not cross, which is the same
      assumption the spacing and parallel rules are stated under. */
   var VOICES = ["Bass", "Tenor", "Alto", "Soprano"];
+  var VOICE_SHORT = ["B", "T", "A", "S"];
   var ROLES = ["root", "third", "fifth"];
 
   function voicesOf(slot){
@@ -979,6 +999,15 @@
       if (degree === 5 && counts[leadingLetter()] > 1)
         add("caution", "The leading tone " + letterText(degree, leadingLetter()) +
             " is doubled \u2014 watch it on the next move: one copy still has to rise.");
+
+      /* a lower voice sounding above the one named over it */
+      if (v.length === MAX_VOICES){
+        for (var lower = 0; lower + 1 < MAX_VOICES; lower++){
+          if (v[lower].midi > v[lower + 1].midi)
+            add("error", VOICES[lower] + " is above the " + VOICES[lower + 1] + " (" +
+                v[lower].name + " over " + v[lower + 1].name + ") \u2014 the voices have crossed.");
+        }
+      }
 
       /* spacing: the two upper gaps only */
       if (v.length === MAX_VOICES){
