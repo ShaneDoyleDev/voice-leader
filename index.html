@@ -879,13 +879,13 @@
     [layerNotes, layerGhost, layerSlot].forEach(function(l){
       while (l.firstChild) l.removeChild(l.firstChild);
     });
-    var focus = drag ? state.notes[drag.index] : (hover || (keyboard ? cursor : null));
+    var focus = drag ? drag.note : (hover || (keyboard ? cursor : null));
     if (focus) layerSlot.appendChild(el("rect",{x:SLOT_X[focus.slot]-22,y:44,width:44,height:172,rx:3,fill:"var(--accent-soft)"}));
     if (playingSlot != null && SLOT_X[playingSlot] != null)
       layerSlot.appendChild(el("rect",{x:SLOT_X[playingSlot]-24,y:44,width:48,height:172,rx:3,
                                        fill:"var(--accent-soft)"}));
     state.notes.forEach(function(n,i){
-      if (drag && drag.index === i) return;
+      if (drag && drag.note === n) return;
       layerNotes.appendChild(noteGroup(n,{
         color: isChordTone(n) ? "var(--ink)" : "var(--wrong)",
         label: showNames
@@ -893,7 +893,7 @@
     });
     /* the preview and the note in hand follow the Note names toggle, rather
        than naming themselves whether or not it is on */
-    if (drag) layerGhost.appendChild(noteGroup(state.notes[drag.index],{color:"var(--accent)",label:showNames}));
+    if (drag) layerGhost.appendChild(noteGroup(drag.note,{color:"var(--accent)",label:showNames}));
     else if (focus && indexAt(focus.slot, focus.step) === -1 && !slotFull(focus.slot))
       layerGhost.appendChild(noteGroup(focus,{color:"var(--accent)",label:showNames,opacity:0.55,pop:false}));
 
@@ -1484,19 +1484,22 @@
 
   function setCursor(p){
     svg.style.cursor = drag ? "grabbing"
-      : cueHit(p) != null ? "pointer"
-      : hitNote(p) > -1 ? "grab" : "crosshair";
+      : hitNote(p) > -1 ? "grab"          /* a note there answers first: pressing it drags */
+      : cueHit(p) != null ? "pointer" : "crosshair";
   }
 
   svg.addEventListener("pointermove", function(e){
     var p = local(e);
     setCursor(p);
     if (drag){
-      var t = targetAt(p), n = state.notes[drag.index];
+      var n = drag.note, at = state.notes.indexOf(n);
+      if (at < 0){ drag = null; render(); return; }   /* it was cleared from under us */
+      var t = targetAt(p);
       if (t.slot !== n.slot && slotFull(t.slot)) return;   /* that chord is full */
       if ((t.slot !== n.slot || t.step !== n.step) && indexAt(t.slot, t.step) === -1){
         if (t.slot === n.slot) t.voice = n.voice;    /* moving within a chord keeps the voice */
-        state.notes[drag.index] = t;
+        state.notes[at] = t;
+        drag.note = t;
         drag.moved = true;
         render();
       }
@@ -1524,7 +1527,7 @@
     var p = local(e), hit = hitNote(p);
     svg.setPointerCapture(e.pointerId);
     press = { id:e.pointerId, x:p.x, y:p.y };
-    if (hit > -1){ drag = { index:hit, moved:false }; setCursor(p); render(); }
+    if (hit > -1){ drag = { note:state.notes[hit], moved:false }; setCursor(p); render(); }
   });
   svg.addEventListener("pointercancel", function(){
     press = null; drag = null;
@@ -1544,7 +1547,8 @@
     }
     if (drag){
       var d = drag; drag = null;
-      var n = state.notes[d.index];
+      var n = d.note, at = state.notes.indexOf(n);
+      if (at < 0){ hover = targetAt(p); setCursor(p); render(); return; }   /* gone mid-drag */
       var travelled = Math.hypot(p.x - from.x, p.y - from.y) > 10;
       if (d.moved){
         play(n.slot, n.step);
@@ -1553,7 +1557,7 @@
         lastClick = null;      /* a drag with nowhere to land leaves the note put */
       } else if (lastClick && lastClick.slot === n.slot && lastClick.step === n.step &&
                  Date.now() - lastClick.at < DOUBLE_MS){
-        state.notes.splice(d.index, 1);      /* second click of a double — take it off */
+        state.notes.splice(at, 1);           /* second click of a double — take it off */
         lastClick = null;
       } else {
         lastClick = { slot:n.slot, step:n.step, at:Date.now() };   /* maybe the first of two */
@@ -1588,6 +1592,7 @@
     } else cursor.step = next;
   }
   wrap.addEventListener("keydown", function(e){
+    if (drag) return;             /* a keystroke mid-drag is nobody's idea of an edit */
     var handled = true, i;
     switch (e.key){
       case "ArrowUp":    moveCursor(1); break;
