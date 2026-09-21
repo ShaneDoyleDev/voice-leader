@@ -183,6 +183,29 @@
     padding:12px 14px; border-top:1px solid var(--line);
   }
   .toolbar .spacer{flex:1 1 auto}
+  .tempo{                                /* how long Play holds each chord */
+    display:flex; align-items:center; gap:9px; margin-left:2px;
+    font:600 11px/1 "IBM Plex Sans",sans-serif; letter-spacing:.16em;
+    text-transform:uppercase; color:var(--ink-soft);
+  }
+  .tempo input[type="range"]{
+    -webkit-appearance:none; appearance:none;
+    width:104px; height:3px; margin:0; padding:0;
+    background:var(--line); border-radius:2px; cursor:pointer;
+  }
+  .tempo input[type="range"]::-webkit-slider-thumb{
+    -webkit-appearance:none; appearance:none; width:13px; height:13px; border:0;
+    border-radius:50%; background:var(--accent); cursor:pointer;
+  }
+  .tempo input[type="range"]::-moz-range-thumb{
+    width:13px; height:13px; border:0; border-radius:50%;
+    background:var(--accent); cursor:pointer;
+  }
+  .tempo input[type="range"]:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+  .tempo output{
+    min-width:56px; color:var(--ink); letter-spacing:.08em;
+    font-variant-numeric:tabular-nums;
+  }
 
   .checkbar{
     display:flex; flex-wrap:wrap; align-items:center; gap:12px;
@@ -310,6 +333,10 @@
       </div>
       <div class="toolbar">
         <button type="button" id="play">Play</button>
+        <label class="tempo" for="tempo">Tempo
+          <input type="range" id="tempo" min="40" max="168" step="2" value="60">
+          <output id="tempoval" for="tempo">60 bpm</output>
+        </label>
         <span class="spacer"></span>
         <button type="button" id="btn-clear" class="ghost">Clear notes</button>
       </div>
@@ -1416,7 +1443,10 @@
   }
   /* Nothing sounds as it is written — placing, dragging and clearing are
      all silent. A chord is heard when it is asked for: Play, or its chip. */
-  function play(slot, step){
+  /* `hold` caps how long the note rings, in milliseconds. Playback passes
+     the beat, so the chords stay distinct at a fast tempo instead of piling
+     up — a sample runs 2.4 seconds, which is seven chords deep at 168. */
+  function play(slot, step, hold){
     var ctx = audio();
     if (!ctx) return;
     var midi = midiAt(slot, step), t = ctx.currentTime;
@@ -1429,6 +1459,7 @@
     src.playbackRate.value = Math.pow(2, (midi - near) / 12);
     /* resampling stretches the clip, so fade against its real length */
     var dur = src.buffer.duration / src.playbackRate.value;
+    if (hold) dur = Math.min(dur, hold / 1000);
     g.gain.setValueAtTime(0.85, t);
     g.gain.setValueAtTime(0.85, t + dur * 0.55);
     g.gain.linearRampToValueAtTime(0.0001, t + dur * 0.97);
@@ -1450,7 +1481,13 @@
   /* ---------- playback ----------------------------------------------------
      Each chord in turn, its four voices together, with the column lit while
      it sounds. */
-  var CHORD_MS = 1150, playTimer = null, ringTimer = null, playingSlot = null;
+  /* One chord to the beat, at whatever the tempo slider says. The next chord
+     is scheduled as the current one starts, so moving the slider mid-playback
+     takes effect from the following chord rather than waiting for the end. */
+  var tempo = document.getElementById("tempo"), tempoOut = document.getElementById("tempoval");
+  function chordMs(){ return Math.round(60000 / (+tempo.value || 60)); }
+  tempo.addEventListener("input", function(){ tempoOut.textContent = tempo.value + " bpm"; });
+  var playTimer = null, ringTimer = null, playingSlot = null;
   function stopPlayback(){
     if (playTimer){ clearTimeout(playTimer); playTimer = null; }
     if (ringTimer){ clearTimeout(ringTimer); ringTimer = null; }
@@ -1469,7 +1506,7 @@
     notes.forEach(function(n){ play(slot, n.step); });
     playingSlot = slot;
     if (ringTimer) clearTimeout(ringTimer);
-    ringTimer = setTimeout(stopPlayback, CHORD_MS);
+    ringTimer = setTimeout(stopPlayback, chordMs());
     render();
   }
   function playProgression(){
@@ -1481,10 +1518,10 @@
     (function next(){
       if (slot >= state.chords.length){ stopPlayback(); return; }
       playingSlot = slot;
-      notesIn(slot).forEach(function(n){ play(slot, n.step); });
+      notesIn(slot).forEach(function(n){ play(slot, n.step, chordMs() * 1.6); });
       render();
       slot++;
-      playTimer = setTimeout(next, CHORD_MS);
+      playTimer = setTimeout(next, chordMs());
     })();
   }
 
