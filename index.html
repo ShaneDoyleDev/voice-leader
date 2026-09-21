@@ -350,7 +350,7 @@
       <h2 id="stagekey"></h2>
       <span class="prog" id="stageprog"></span>
       <span class="spacer"></span>
-      <button type="button" class="ghost" id="again" hidden>Another drill</button>
+      <button type="button" class="ghost" id="again" hidden>Reroll exercise</button>
       <button type="button" class="ghost" id="edit">Change key or progression</button>
     </div>
 
@@ -586,9 +586,25 @@
     for (i = 0; i < n; i++) out.push(floor + span * shape(n < 2 ? 0 : i / (n - 1)));
     return out;
   }
-  function toneNear(letters, lo, hi, target){
-    var cands = [];
+  /* A letter can appear only once within a voice's range — the bass has a
+     single D to choose from, the soprano a single B — so a line can walk
+     itself into a corner where the one note left is a seventh away. Every
+     note therefore looks a chord ahead and will not stand where the next one
+     cannot be reached by a decent interval. */
+  function reachable(step, next, lo, hi, leap){
+    var ok = false;
+    next.forEach(function(l){
+      stepsFor(l, lo, hi).forEach(function(s){ if (Math.abs(s - step) <= leap) ok = true; });
+    });
+    return ok;
+  }
+  function toneNear(letters, lo, hi, target, next, leap){
+    var cands = [], open;
     letters.forEach(function(l){ cands = cands.concat(stepsFor(l, lo, hi)); });
+    if (next){
+      open = cands.filter(function(s){ return reachable(s, next, lo, hi, leap); });
+      if (open.length) cands = open;
+    }
     return cands.reduce(function(a, b){
       return Math.abs(b - target) < Math.abs(a - target) ? b : a;
     });
@@ -596,7 +612,7 @@
   /* the next note of a written line: a step or two is likeliest, a leap
      beyond a sixth never happens, a repeat is allowed but rare, and of the
      notes that qualify the one nearest the contour is likeliest of all */
-  function nextInLine(prev, letters, lo, hi, leap, target){
+  function nextInLine(prev, letters, lo, hi, leap, target, next){
     var cands = [];
     letters.forEach(function(l){ cands = cands.concat(stepsFor(l, lo, hi)); });
     if (!cands.length) return prev;
@@ -606,6 +622,10 @@
       if (w && target != null) w *= Math.pow(0.55, Math.abs(step - target));   /* pull to the shape */
       return { step:step, w:w };
     }).filter(function(c){ return c.w > 0; });
+    if (next){                        /* not into a corner, if there is a way round it */
+      var open = scored.filter(function(c){ return reachable(c.step, next, lo, hi, leap); });
+      if (open.length) scored = open;
+    }
     if (!scored.length)
       return cands.reduce(function(a,b){ return Math.abs(b-prev) < Math.abs(a-prev) ? b : a; });
     var total = scored.reduce(function(t,c){ return t + c.w; }, 0), r = Math.random() * total, i;
@@ -625,9 +645,10 @@
     var line = [], prev = null;
     chords.forEach(function(degree, i){
       var letter = chordLetters(degree)[0];
+      var next = i + 1 < chords.length ? [chordLetters(chords[i + 1])[0]] : null;
       var step = prev == null
-        ? toneNear([letter], BASS_LO, BASS_HI, aim[0])
-        : nextInLine(prev, [letter], BASS_LO, BASS_HI, 5, aim[i]);
+        ? toneNear([letter], BASS_LO, BASS_HI, aim[0], next, 5)
+        : nextInLine(prev, [letter], BASS_LO, BASS_HI, 5, aim[i], next);
       line.push(step);
       prev = step;
     });
@@ -638,12 +659,17 @@
     var line = [], prev = null, prevDegree = null;
     chords.forEach(function(degree, i){
       var tones = chordLetters(degree), last = i === chords.length - 1, step;
+      /* the closing chord is written on its root alone, so it is the one
+         that can be out of reach; the rest offer all three tones */
+      var next = last ? null
+        : (i + 2 === chords.length ? [chordLetters(chords[i + 1])[0]]
+                                   : chordLetters(chords[i + 1]));
       if (prev == null){
-        step = toneNear(tones, SOP_LO, SOP_HI, aim[0]);
+        step = toneNear(tones, SOP_LO, SOP_HI, aim[0], next, 4);
       } else if (prevDegree === 5 && prev % 7 === leadingLetter() && degree === 1){
         step = prev + 1;            /* a leading tone in the soprano has one move: up a step */
       } else {
-        step = nextInLine(prev, last ? [tones[0]] : tones, SOP_LO, SOP_HI, 4, aim[i]);
+        step = nextInLine(prev, last ? [tones[0]] : tones, SOP_LO, SOP_HI, 4, aim[i], next);
       }
       line.push(step);
       prev = step; prevDegree = degree;
