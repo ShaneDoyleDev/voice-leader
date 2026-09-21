@@ -577,9 +577,9 @@
   }
   var svg = document.getElementById("staff");
   var layerSlot = el("g",{}), layerStaff = el("g",{}), layerLabels = el("g",{}),
-      layerNotes = el("g",{}), layerGhost = el("g",{id:"ghost"});
+      layerFlow = el("g",{}), layerNotes = el("g",{}), layerGhost = el("g",{id:"ghost"});
   svg.appendChild(layerSlot); svg.appendChild(layerStaff); svg.appendChild(layerLabels);
-  svg.appendChild(layerNotes); svg.appendChild(layerGhost);
+  svg.appendChild(layerFlow); svg.appendChild(layerNotes); svg.appendChild(layerGhost);
 
   function drawStaff(){
     while (layerStaff.firstChild) layerStaff.removeChild(layerStaff.firstChild);
@@ -701,6 +701,40 @@
     })();
   }
 
+  /* Once a chord is voiced, a faint line runs from each voice of the chord
+     before it to the same voice here, so the four lines are visible as
+     lines. Each pair draws itself once, when it first becomes complete;
+     the length is stroked in over time rather than by a CSS animation,
+     since every render rebuilds these and a CSS one would start over. */
+  var FLOW_MS = 420, flowStart = {}, flowFrame = null;
+  function drawFlow(){
+    while (layerFlow.firstChild) layerFlow.removeChild(layerFlow.firstChild);
+    var rows = chordVoices();
+    if (!rows){ flowStart = {}; return; }
+    var now = performance.now(), running = false, half = glyphW("noteheadBlack", S) / 2, i, v;
+    for (i = 0; i + 1 < rows.length; i++){
+      var a = rows[i], b = rows[i + 1];
+      if (!a || !b){ delete flowStart[i]; continue; }
+      if (flowStart[i] == null) flowStart[i] = reducedMotion() ? now - FLOW_MS : now;
+      var t = Math.min(1, (now - flowStart[i]) / FLOW_MS);
+      if (t < 1) running = true;
+      var ease = 1 - Math.pow(1 - t, 3);
+      for (v = 0; v < MAX_VOICES; v++){
+        var x1 = SLOT_X[i] + half + 3, y1 = yOf(a[v].step, a[v].staff);
+        var x2 = SLOT_X[i + 1] - half - 3, y2 = yOf(b[v].step, b[v].staff);
+        var len = Math.hypot(x2 - x1, y2 - y1);
+        layerFlow.appendChild(el("line",{
+          x1:x1, y1:y1, x2:x2, y2:y2,
+          stroke:"var(--accent)", "stroke-width":1.2, "stroke-linecap":"round",
+          opacity:0.32, "stroke-dasharray":len.toFixed(2),
+          "stroke-dashoffset":(len * (1 - ease)).toFixed(2)
+        }));
+      }
+    }
+    if (running && !flowFrame)
+      flowFrame = requestAnimationFrame(function(){ flowFrame = null; render(); });
+  }
+
   function noteGroup(note, opts){
     var g = el("g",{}), x = SLOT_X[note.slot], y = yOf(note.step, note.staff), color = opts.color;
     var def = STAVES[note.staff], n = ledgerCount(note.staff, note.step), i, ly;
@@ -779,6 +813,7 @@
     }
     updateVoices();
     drawLabels();
+    drawFlow();
     renderChips();
     if (report && reportKey !== notesKey()) report = null;   /* edited since — stale */
     renderReport();
