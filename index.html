@@ -232,6 +232,15 @@
     text-transform:uppercase; color:var(--ink-soft);
   }
   .chips{display:flex;flex-wrap:wrap;gap:8px;margin:0;padding:0;list-style:none}
+  .chips li{display:flex}
+  button.chip{                           /* it plays its chord; inert until the chord is right */
+    border:0; margin:0; color:inherit; font:inherit; text-align:left; cursor:pointer;
+    transition:background .12s ease;
+  }
+  button.chip:disabled{cursor:default;opacity:1}
+  button.chip:not(:disabled):hover,
+  button.chip.playing{background:var(--accent-soft)}
+  button.chip:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   .chip{
     display:flex; align-items:baseline; gap:8px;
     padding:6px 10px; background:var(--chip); border-radius:3px;
@@ -634,12 +643,6 @@
                          "text-anchor":"middle", "font-family":"Spectral, Georgia, serif",
                          "font-size":16, "font-weight": complete ? 600 : 500,
                          "letter-spacing":"0.04em"});
-      if (notesIn(i).length){
-        var hint = el("title",{});
-        hint.textContent = "Play this chord";
-        t.appendChild(hint);
-        t.style.cursor = "pointer";
-      }
       t.appendChild(document.createTextNode(numeralOf(degree)));
       var fig = inversionOf(i);
       if (fig){
@@ -861,8 +864,7 @@
 
   /* ---------- staff state -------------------------------------------------- */
   var showNames = false, soundOn = false;   /* off until asked for; Play turns it on */
-  var hover = null, hoverNear = false, hoverNumeral = false;
-  var drag = null, press = null, cursor = null;
+  var hover = null, hoverNear = false, drag = null, press = null, cursor = null;
   var keyboard = false, lastClick = null;
 
   var MAX_VOICES = 4;                      /* one chord, four voices */
@@ -902,7 +904,7 @@
     /* the preview and the note in hand follow the Note names toggle, rather
        than naming themselves whether or not it is on */
     if (drag) layerGhost.appendChild(noteGroup(drag.note,{color:"var(--accent)",label:showNames,pop:false}));
-    else if (focus && !hoverNumeral && indexAt(focus.slot, focus.step) === -1 && !slotFull(focus.slot))
+    else if (focus && indexAt(focus.slot, focus.step) === -1 && !slotFull(focus.slot))
       layerGhost.appendChild(noteGroup(focus,{color:"var(--accent)",label:showNames,opacity:0.55,pop:false}));
 
     /* A full chord takes no more notes; a cross over its column clears it.
@@ -955,6 +957,10 @@
     document.getElementById("results").scrollIntoView({block:"nearest", behavior:"smooth"});
   });
   function renderChips(){
+    /* playing a chord re-renders, which throws away the very button that was
+       pressed — so the keyboard keeps its place across the rebuild */
+    var held = document.activeElement, heldSlot = held && held.className &&
+      String(held.className).indexOf("chip") > -1 ? held.getAttribute("data-slot") : null;
     chips.innerHTML = "";
     var rows = chordVoices();
     var bySlot = {}, any = false;
@@ -968,7 +974,18 @@
     }
     Object.keys(bySlot).map(Number).sort(function(a,b){return a-b;}).forEach(function(slot){
       var li = document.createElement("li");
-      li.className = "chip";
+      /* A chord that is right can be heard on its own from here; one still
+         being built has nothing to play, so the chip is simply inert. */
+      var box = document.createElement("button");
+      box.type = "button";
+      box.className = "chip" + (slot === playingSlot ? " playing" : "");
+      box.setAttribute("data-slot", slot);
+      if (chordIsClean(slot)){
+        box.title = "Play this chord";
+        box.addEventListener("click", function(){ playSlot(slot); });
+      } else {
+        box.disabled = true;
+      }
       var b = document.createElement("b");
       numeralInto(b, slot);
       var s = document.createElement("span");
@@ -989,8 +1006,11 @@
           .sort(function(a,b){return a-b;})
           .map(function(step){ return nameAt(slot, step); }).join("  ");
       }
-      li.appendChild(b); li.appendChild(s);
+      box.appendChild(b); box.appendChild(s);
+      li.appendChild(box);
       chips.appendChild(li);
+      if (heldSlot != null && +heldSlot === slot && !box.disabled)
+        box.focus({preventScroll:true});
     });
   }
 
@@ -1450,9 +1470,9 @@
     playBtn.textContent = "Play";
     render();
   }
-  /* A click on a chord's numeral sounds that chord alone, its column lit
-     for as long as it rings — the progression's own gesture, one chord wide.
-     It gives way to Play rather than competing with it. */
+  /* A click on a chord's chip in the readout sounds that chord alone, its
+     column lit for as long as it rings — the progression's own gesture, one
+     chord wide. It gives way to Play rather than competing with it. */
   function playSlot(slot){
     var notes = notesIn(slot);
     if (!notes.length) return;
@@ -1509,26 +1529,13 @@
     if (SLOT_X[slot] == null || !slotFull(slot)) return null;
     return Math.abs(p.x - SLOT_X[slot]) <= 26 ? slot : null;
   }
-  /* the numeral under a chord, which sounds that chord on its own. Bounded
-     to its own column, like the cross above it. An empty chord's numeral has
-     nothing to play, but it still takes the click: below the staff a click
-     otherwise lands on the lowest line, and a stray E2 is no answer to
-     pressing a numeral. */
-  function numeralHit(p){
-    if (p.y < 217 || p.y > 237) return null;
-    var slot = slotAt(p.x);
-    if (SLOT_X[slot] == null) return null;
-    return Math.abs(p.x - SLOT_X[slot]) <= 26 ? slot : null;
-  }
   function hitNote(p){
     var t = targetAt(p);
     return indexAt(t.slot, t.step);
   }
 
   function setCursor(p){
-    var num = numeralHit(p);
     svg.style.cursor = drag ? "grabbing"
-      : num != null ? (notesIn(num).length ? "pointer" : "default")
       : hitNote(p) > -1 ? "grab"          /* a note there answers first: pressing it drags */
       : cueHit(p) != null ? "pointer" : "crosshair";
   }
@@ -1554,18 +1561,17 @@
     var t2 = targetAt(p);
     /* whether the pointer is in that chord's own column, not merely nearest
        to it — the cross is offered on that, so it has to redraw on it too */
-    var near = Math.abs(p.x - SLOT_X[t2.slot]) <= 30, onNumeral = numeralHit(p) != null;
+    var near = Math.abs(p.x - SLOT_X[t2.slot]) <= 30;
     if (!hover || hover.slot !== t2.slot || hover.step !== t2.step ||
-        hover.staff !== t2.staff || near !== hoverNear || onNumeral !== hoverNumeral){
+        hover.staff !== t2.staff || near !== hoverNear){
       hover = t2;
       hoverNear = near;
-      hoverNumeral = onNumeral;
       render();
     }
   });
   svg.addEventListener("pointerleave", function(){
     if (drag) return;
-    hover = null; hoverNear = false; hoverNumeral = false;
+    hover = null; hoverNear = false;
     svg.style.cursor = "crosshair";
     render();
   });
@@ -1575,7 +1581,7 @@
      than by element, and only when neither of them was a drag. */
   var DOUBLE_MS = 450;
   svg.addEventListener("pointerdown", function(e){
-    var p = local(e), hit = numeralHit(p) != null ? -1 : hitNote(p);
+    var p = local(e), hit = hitNote(p);
     svg.setPointerCapture(e.pointerId);
     press = { id:e.pointerId, x:p.x, y:p.y };
     if (hit > -1){ drag = { note:state.notes[hit], moved:false }; setCursor(p); render(); }
@@ -1595,12 +1601,6 @@
       hover = null; lastClick = null;
       clearNotes(cue);                 /* the same drift as Clear notes */
       setCursor(p); render(); return;
-    }
-    var num = numeralHit(p);
-    if (num != null && !drag){
-      lastClick = null;
-      playSlot(num);
-      setCursor(p); return;
     }
     if (drag){
       var d = drag; drag = null;
@@ -1673,7 +1673,7 @@
     }
     if (!handled) return;
     e.preventDefault();
-    keyboard = true; hover = null; hoverNumeral = false; render();
+    keyboard = true; hover = null; render();
   });
   wrap.addEventListener("focus", function(){ keyboard = true; render(); });
   wrap.addEventListener("blur", function(){ keyboard = false; render(); });
