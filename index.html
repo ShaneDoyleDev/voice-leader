@@ -309,7 +309,6 @@
         <svg id="staff" viewBox="0 0 640 256" aria-hidden="true"></svg>
       </div>
       <div class="toolbar">
-        <button type="button" id="btn-names" aria-pressed="false">Note names</button>
         <button type="button" id="btn-sound" aria-pressed="false">Sound</button>
         <button type="button" id="play">Play</button>
         <span class="spacer"></span>
@@ -762,7 +761,7 @@
     var ease = 1 - Math.pow(1 - t, 2);
     fading.notes.forEach(function(n){
       if (SLOT_X[n.slot] == null) return;
-      var g = noteGroup(n, {color:"var(--ink)", label:false, pop:false, opacity:(1 - ease).toFixed(3)});
+      var g = noteGroup(n, {color:"var(--ink)", pop:false, opacity:(1 - ease).toFixed(3)});
       g.setAttribute("transform", "translate(0," + (-13 * ease).toFixed(2) + ")");
       layerGhost.appendChild(g);
     });
@@ -848,12 +847,6 @@
     var up = note.step < def.mid, sx = up ? x + half - 0.7 : x - half + 0.7;
     g.appendChild(el("line",{x1:sx, y1:y, x2:sx, y2: up ? y - 42 : y + 42,
                              stroke:color, "stroke-width":1.4}));
-    if (opts.label){
-      var t = el("text",{x:x+half+5,y:y+4,fill:color,"font-size":11,
-                         "font-family":"IBM Plex Sans, sans-serif","font-weight":500});
-      t.textContent = nameAt(note.slot, note.step);
-      g.appendChild(t);
-    }
     if (opts.opacity != null) g.setAttribute("opacity", opts.opacity);
     var scale = opts.pop === false ? 1 : popScale(note);
     if (scale !== 1)
@@ -863,7 +856,7 @@
   }
 
   /* ---------- staff state -------------------------------------------------- */
-  var showNames = false, soundOn = false;   /* off until asked for; Play turns it on */
+  var soundOn = false;                     /* off until asked for; Play turns it on */
   var hover = null, hoverNear = false, drag = null, press = null, cursor = null;
   var keyboard = false, lastClick = null;
 
@@ -897,15 +890,12 @@
     state.notes.forEach(function(n,i){
       if (drag && drag.note === n) return;
       layerNotes.appendChild(noteGroup(n,{
-        color: isChordTone(n) ? "var(--ink)" : "var(--wrong)",
-        label: showNames
+        color: isChordTone(n) ? "var(--ink)" : "var(--wrong)"
       }));
     });
-    /* the preview and the note in hand follow the Note names toggle, rather
-       than naming themselves whether or not it is on */
-    if (drag) layerGhost.appendChild(noteGroup(drag.note,{color:"var(--accent)",label:showNames,pop:false}));
+    if (drag) layerGhost.appendChild(noteGroup(drag.note,{color:"var(--accent)",pop:false}));
     else if (focus && indexAt(focus.slot, focus.step) === -1 && !slotFull(focus.slot))
-      layerGhost.appendChild(noteGroup(focus,{color:"var(--accent)",label:showNames,opacity:0.55,pop:false}));
+      layerGhost.appendChild(noteGroup(focus,{color:"var(--accent)",opacity:0.55,pop:false}));
 
     /* A full chord takes no more notes; a cross over its column clears it.
        Only while the pointer is in that column, though — the nearest chord
@@ -1874,12 +1864,7 @@
   });
 
   /* ---------- toolbar --------------------------------------------------------- */
-  var btnNames = document.getElementById("btn-names"), btnSound = document.getElementById("btn-sound");
-  btnNames.addEventListener("click", function(){
-    showNames = !showNames;
-    btnNames.setAttribute("aria-pressed", String(showNames));
-    render();
-  });
+  var btnSound = document.getElementById("btn-sound");
   btnSound.addEventListener("click", function(){
     soundOn = !soundOn;
     btnSound.setAttribute("aria-pressed", String(soundOn));
