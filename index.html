@@ -823,7 +823,9 @@
         label: showNames
       }));
     });
-    if (drag) layerGhost.appendChild(noteGroup(state.notes[drag.index],{color:"var(--accent)",label:true}));
+    /* the preview and the note in hand follow the Note names toggle, rather
+       than naming themselves whether or not it is on */
+    if (drag) layerGhost.appendChild(noteGroup(state.notes[drag.index],{color:"var(--accent)",label:showNames}));
     else if (focus && indexAt(focus.slot, focus.step) === -1){
       if (slotFull(focus.slot)){
         var full = el("text",{x:SLOT_X[focus.slot], y:52, "text-anchor":"middle", "font-size":8.5,
@@ -831,7 +833,7 @@
         full.textContent = "4 voices";
         layerGhost.appendChild(full);
       } else {
-        layerGhost.appendChild(noteGroup(focus,{color:"var(--accent)",label:true,opacity:0.55,pop:false}));
+        layerGhost.appendChild(noteGroup(focus,{color:"var(--accent)",label:showNames,opacity:0.55,pop:false}));
       }
     }
     updateVoices();
