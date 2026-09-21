@@ -935,8 +935,8 @@
   checkBtn.addEventListener("click", function(){
     report = runChecks();
     reportKey = notesKey();
-    flowAt = performance.now() - (reducedMotion() ? 1e6 : 0);   /* draw the voices */
-    renderReport();
+    flowAt = performance.now() - (reducedMotion() ? 1e6 : 0);
+    render();          /* starts the lines drawing; renderReport alone would not */
     document.getElementById("results").scrollIntoView({block:"nearest", behavior:"smooth"});
   });
   function renderChips(){
