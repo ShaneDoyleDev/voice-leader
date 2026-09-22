@@ -1486,12 +1486,20 @@
         }
       });
 
-      /* doubling, and the third as the weaker double */
+      /* Doubling. A doubled third is the weaker choice in a major triad —
+         it is the note that gives the chord its character, and two of it
+         thickens what should stay clear. A minor triad is the other way
+         about: doubling its third is ordinary, and often the best answer, so
+         it passes without comment. Three copies still draw one, in any
+         quality, since that is a chord missing something else. */
       tones.forEach(function(l, idx){
         if (!(counts[l] > 1)) return;
         var what = (counts[l] > 2 ? "Three copies of the " : "Doubles the ") +
                    ROLES[idx] + ", " + letterText(degree, l);
-        if (idx === 1) add("caution", what + " \u2014 the weaker double; the root or the fifth is the safer choice.");
+        if (idx === 1 && quality(degree) === "min" && counts[l] === 2)
+          add("ok", what + " \u2014 ordinary in a minor triad.");
+        else if (idx === 1)
+          add("caution", what + " \u2014 the weaker double; the root or the fifth is the safer choice.");
         else add("ok", what + ".");
       });
 
