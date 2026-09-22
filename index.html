@@ -298,6 +298,47 @@
   }
   .empty{margin:0;color:var(--ink-soft);font-style:italic}
   @media (prefers-reduced-motion: no-preference){ #ghost{transition:opacity .12s ease} }
+
+  /* ---------- a phone ------------------------------------------------------
+     Everything below is additive under 600px; the layout above that width is
+     the one this app was drawn for and is left alone. A cursor lands where it
+     is pointed, so 30px of button is plenty for it; a fingertip covers about
+     9mm, which is where the 44px everyone quotes comes from. */
+  @media (max-width: 600px){
+    body{padding:14px 12px 40px}
+    .wrap{padding:16px 10px}
+    .field{padding:16px 14px 18px}
+    .start{padding:14px}
+    button{min-height:44px; padding:11px 14px; font-size:14px}
+    .numerals{gap:8px}
+    .numerals button{min-height:54px; padding:9px 14px; font-size:18px}
+    .drills button{min-height:64px}
+    .seq{padding:10px}
+    .seq .slot{min-height:52px; padding:8px 14px}
+    .start button.go{min-height:48px; padding:13px 22px}
+    .toolbar{gap:10px; padding:12px}
+    .checkbar{padding:12px}
+    .checkbar button{min-height:48px}
+    .chip{min-height:44px; padding:10px 12px}
+    button.chip{min-height:44px}
+    /* the wedges are the smallest thing to aim at, and the inner ring of
+       relative minors the smallest of those. The circle takes the whole
+       panel, out through the padding either side, which is the difference
+       between a 38px wedge and one a finger can hit. */
+    .circlewrap{max-width:none; width:calc(100% + 28px); margin-left:-14px; margin-right:-14px}
+    /* the slider is the one control a finger cannot aim at at all: a 13px
+       thumb on a 3px rail is a mouse target, and the rail is also the whole
+       height of the input, so the band you can actually press is 3px. The
+       input gets a finger's height and the rail is drawn inside it. */
+    .tempo{gap:10px; flex:1 1 100%}
+    .tempo input[type="range"]{flex:1 1 auto; width:auto; height:28px; background:transparent}
+    .tempo input[type="range"]::-webkit-slider-runnable-track{
+      height:4px; border-radius:2px; background:var(--line);
+    }
+    .tempo input[type="range"]::-webkit-slider-thumb{width:26px; height:26px; margin-top:-11px}
+    .tempo input[type="range"]::-moz-range-track{height:4px; border-radius:2px; background:var(--line)}
+    .tempo input[type="range"]::-moz-range-thumb{width:26px; height:26px}
+  }
 </style>
 </head>
 <body>
