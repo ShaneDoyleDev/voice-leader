@@ -321,6 +321,13 @@
     .checkbar button{min-height:48px}
     .chip{min-height:44px; padding:10px 12px}
     button.chip{min-height:44px}
+    /* The staff no longer shrinks to fit, so it has to be pannable. A finger
+       drawn sideways scrolls it; a finger drawn up or down still belongs to
+       the staff, which is what places and moves notes. pan-x hands the
+       browser exactly one axis and keeps the other for the pointer handlers,
+       which is the whole bargain: you cannot drag a note between chords by
+       touch, but you can reach every chord and set every pitch. */
+    .staffwrap{overflow-x:auto; overflow-y:hidden; touch-action:pan-x; padding:6px 0 2px}
     /* the wedges are the smallest thing to aim at, and the inner ring of
        relative minors the smallest of those. The circle takes the whole
        panel, out through the padding either side, which is the difference
@@ -455,7 +462,18 @@
 
   /* ---------- staff geometry -------------------------------------------- */
   var S = 12, HALF = S / 2;
-  var STAFF_L = 30, STAFF_R = 612, SIG_X = 92;
+  /* The staff is drawn on a canvas 640 units wide and 276 tall, and scaled
+     to whatever width it is given. That is the right bargain on a desktop —
+     a half-step lands around eight pixels — but a phone would render the
+     same canvas at 0.5px a unit, putting a line and the space beside it
+     three pixels apart, which no finger can aim at and no eye can read. So
+     on a narrow screen the canvas is cut to what the progression actually
+     needs, given a pixel width that keeps a half-step legible, and panned.
+     Only the horizontal is involved: the pitch model, the two staves and
+     every y in this file are exactly as they were. */
+  var VIEW_H = 276, CANVAS = 640, unitPx = 1;
+  var STAFF_L = 30, SIG_X = 92;
+  function staffR(){ return CANVAS - 28; }
   /* Each staff carries its own top line and the y it is drawn at, so the two
      can sit any distance apart. A pitch therefore has no single height: with
      the staves further apart than the two spaces that would put middle C
@@ -721,13 +739,43 @@
   /* horizontal position of each chord, cleared of the key signature */
   var SLOT_X = [];
   function layoutSlots(){
-    var n = state.chords.length, first = SIG_X + sigWidth(S) + 46, last = 578, xs = [], i;
+    var n = state.chords.length, first = SIG_X + sigWidth(S) + 46, last = CANVAS - 62, xs = [], i;
     if (n === 1) return [(first + last) / 2];
     var gap = Math.min((last - first) / (n - 1), 108);
     var start = first + ((last - first) - gap * (n - 1)) / 2;
     for (i = 0; i < n; i++) xs.push(start + i * gap);
     return xs;
   }
+  /* Below the phone breakpoint the staff stops shrinking to fit. The canvas
+     is cut to the progression — 108 units between columns, the spacing a
+     wide screen already uses — and drawn at whatever px-per-unit keeps a
+     half-step between 8 and 12 pixels while leaving the toolbar on screen,
+     with the wrapper panning to reach the rest. Above the breakpoint the
+     canvas stays 640 and the staff scales to its container, as before. */
+  var PHONE = "(max-width: 600px)";
+  function narrow(){
+    try { return window.matchMedia(PHONE).matches; } catch (e) { return false; }
+  }
+  function fitStaff(){
+    var n = Math.max(1, state.chords.length);
+    if (!narrow()){
+      CANVAS = 640;
+      svg.style.width = "";
+      svg.style.height = "";
+      svg.setAttribute("viewBox", "0 0 " + CANVAS + " " + VIEW_H);
+      unitPx = (svg.getBoundingClientRect().width || CANVAS) / CANVAS;
+      return;
+    }
+    CANVAS = Math.round(SIG_X + sigWidth(S) + 46 + 108 * (n - 1) + 62);
+    /* the staff is the page's one irreplaceable element, so it takes what
+       height it can — but not so much that the toolbar under it is offscreen */
+    var room = (window.innerHeight || 700) * 0.52;
+    unitPx = Math.max(8 / HALF, Math.min(12 / HALF, room / VIEW_H));
+    svg.setAttribute("viewBox", "0 0 " + CANVAS + " " + VIEW_H);
+    svg.style.width = Math.round(CANVAS * unitPx) + "px";
+    svg.style.height = Math.round(VIEW_H * unitPx) + "px";
+  }
+
   function slotAt(x){
     var best = 0, bd = Infinity, i, d;
     for (i = 0; i < SLOT_X.length; i++){
@@ -830,14 +878,15 @@
     for (i = 0; i < 5; i++){
       ["treble","bass"].forEach(function(staff){
         var ly = STAVES[staff].topY + i * S;
-        layerStaff.appendChild(el("line",{x1:STAFF_L,y1:ly,x2:STAFF_R,y2:ly,
+        layerStaff.appendChild(el("line",{x1:STAFF_L,y1:ly,x2:staffR(),y2:ly,
                                           stroke:"var(--rule)","stroke-width":1.1}));
       });
     }
     layerStaff.appendChild(el("path",{d:braceD(top - 4, bottom + 4),fill:"var(--ink)"}));
     layerStaff.appendChild(el("line",{x1:STAFF_L,y1:top,x2:STAFF_L,y2:bottom,stroke:"var(--ink)","stroke-width":2.4}));
-    layerStaff.appendChild(el("line",{x1:598,y1:top,x2:598,y2:bottom,stroke:"var(--ink)","stroke-width":1.2}));
-    layerStaff.appendChild(el("line",{x1:607,y1:top,x2:607,y2:bottom,stroke:"var(--ink)","stroke-width":4}));
+    /* the closing double bar, thin then thick, just inside the right edge */
+    layerStaff.appendChild(el("line",{x1:CANVAS-42,y1:top,x2:CANVAS-42,y2:bottom,stroke:"var(--ink)","stroke-width":1.2}));
+    layerStaff.appendChild(el("line",{x1:CANVAS-33,y1:top,x2:CANVAS-33,y2:bottom,stroke:"var(--ink)","stroke-width":4}));
 
     layerStaff.appendChild(glyph("gClef", 46, yOf(32, "treble"), S, "var(--ink)"));   /* G line */
     layerStaff.appendChild(glyph("fClef", 46, yOf(24, "bass"), S, "var(--ink)"));   /* F line */
@@ -2168,6 +2217,7 @@
             "note. The figures follow whatever bass you write."
   };
   function enterStage(){
+    fitStaff();
     SLOT_X = layoutSlots();
     stopPlayback();
     state.live = state.mode + "|" + state.tonic + "|" + state.chords.join(",");
@@ -2198,6 +2248,19 @@
     });
     enterStage();
   }
+  /* a rotation or a window drag changes what the staff can have */
+  var refit = null;
+  window.addEventListener("resize", function(){
+    if (stage.hidden) return;
+    clearTimeout(refit);
+    refit = setTimeout(function(){
+      fitStaff();
+      SLOT_X = layoutSlots();
+      drawStaff();
+      render();
+    }, 120);
+  });
+
   document.getElementById("drill-bass").addEventListener("click", function(){ startDrill("bass"); });
   document.getElementById("drill-sop").addEventListener("click", function(){ startDrill("soprano"); });
   document.getElementById("again").addEventListener("click", function(){ startDrill(state.drill); });
