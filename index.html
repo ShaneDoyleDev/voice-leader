@@ -358,7 +358,7 @@
       <p class="task" id="stagetask" hidden></p>
       <div class="staffwrap" id="staffwrap" tabindex="0" role="application"
            aria-label="Grand staff. Arrow keys move the cursor, Enter places or removes a note.">
-        <svg id="staff" viewBox="0 0 640 256" aria-hidden="true"></svg>
+        <svg id="staff" viewBox="0 0 640 276" aria-hidden="true"></svg>
       </div>
       <div class="toolbar">
         <button type="button" id="play">Play</button>
@@ -1028,6 +1028,56 @@
     }
   }
 
+  /* A sounding chord warms to the accent colour rather than snapping to it.
+     Every render rebuilds the noteheads, so a CSS transition would start
+     over on each one; and a colour token cannot be interpolated by itself,
+     so the two ends are read off the document and mixed here. Reading them
+     per render rather than caching keeps a theme change honest. */
+  var TINT_MS = 260, tintAt = 0, tintFrom = null, tintTo = null, tintFrame = false, tintVars = null;
+  function tintOf(slot){
+    if (slot == null) return 0;
+    if (reducedMotion()) return slot === playingSlot ? 1 : 0;
+    var t = Math.min(1, (performance.now() - tintAt) / TINT_MS);
+    if (slot === tintTo) return t;
+    if (slot === tintFrom) return 1 - t;
+    return slot === playingSlot ? 1 : 0;
+  }
+  function tintRunning(){
+    return !reducedMotion() && (tintTo != null || tintFrom != null) &&
+           performance.now() - tintAt < TINT_MS;
+  }
+  function rgbOf(name){
+    if (!tintVars) tintVars = {};
+    if (tintVars[name] === undefined){
+      var css = "", m;
+      try { css = getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+      catch (e) { css = ""; }
+      m = /^#([0-9a-f]{6})$/i.exec(css);
+      if (m){
+        var n = parseInt(m[1], 16);
+        tintVars[name] = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+      } else {
+        m = /rgba?\(([^)]+)\)/.exec(css);
+        tintVars[name] = m ? m[1].split(",").slice(0, 3).map(Number) : null;
+      }
+    }
+    return tintVars[name];
+  }
+  function mixed(from, to, t){
+    var a = rgbOf(from), b = rgbOf(to);
+    if (!a || !b) return "var(" + (t < 0.5 ? from : to) + ")";   /* nothing to mix with */
+    return "rgb(" + [0,1,2].map(function(i){
+      return Math.round(a[i] + (b[i] - a[i]) * t);
+    }).join(",") + ")";
+  }
+  function noteColor(n){
+    if (!isChordTone(n)) return "var(--wrong)";      /* wrong outranks played */
+    var base = n.given ? "--rule" : "--ink", t = tintOf(n.slot);
+    return t <= 0 ? "var(" + base + ")"
+         : t >= 1 ? "var(--accent)"
+         : mixed(base, "--accent", t);
+  }
+
   function noteGroup(note, opts){
     var g = el("g",{}), x = SLOT_X[note.slot], y = yOf(note.step, note.staff), color = opts.color;
     var def = STAVES[note.staff], n = ledgerCount(note.staff, note.step), i, ly;
@@ -1067,6 +1117,12 @@
     return n;
   }
   function slotFull(slot){ return slotCount(slot) >= MAX_VOICES; }
+  /* what the cross would actually take off: a drill's given voice stays */
+  function written(slot){
+    for (var i = 0; i < state.notes.length; i++)
+      if (state.notes[i].slot === slot && !state.notes[i].given) return true;
+    return false;
+  }
 
   function indexAt(slot, step){
     for (var i = 0; i < state.notes.length; i++)
@@ -1078,6 +1134,10 @@
     [layerNotes, layerGhost, layerSlot].forEach(function(l){
       while (l.firstChild) l.removeChild(l.firstChild);
     });
+    tintVars = null;                       /* re-read the palette, in case the theme moved */
+    if (playingSlot !== tintTo){            /* a chord started or stopped sounding */
+      tintFrom = tintTo; tintTo = playingSlot; tintAt = performance.now();
+    }
     var focus = drag ? drag.note : (hover || (keyboard ? cursor : null));
     if (focus) layerSlot.appendChild(el("rect",{x:SLOT_X[focus.slot]-22,y:44,width:44,height:172,rx:3,fill:"var(--accent-soft)"}));
     if (playingSlot != null && SLOT_X[playingSlot] != null)
@@ -1086,26 +1146,25 @@
     state.notes.forEach(function(n,i){
       if (drag && drag.note === n) return;
       /* the chord that is sounding colours itself, so the ear and the eye
-         are on the same chord. A note that does not belong stays red
-         through it — being wrong outranks being played. */
-      layerNotes.appendChild(noteGroup(n,{
-        color: !isChordTone(n) ? "var(--wrong)"
-             : n.slot === playingSlot ? "var(--accent)"
-             : n.given ? "var(--rule)" : "var(--ink)"
-      }));
+         are on the same chord */
+      layerNotes.appendChild(noteGroup(n,{ color: noteColor(n) }));
     });
     if (drag) layerGhost.appendChild(noteGroup(drag.note,{color:"var(--accent)",pop:false}));
     else if (focus && indexAt(focus.slot, focus.step) === -1 && !slotFull(focus.slot))
       layerGhost.appendChild(noteGroup(focus,{color:"var(--accent)",opacity:0.55,pop:false}));
 
-    /* A full chord takes no more notes; a cross over its column clears it.
-       Only while the pointer is in that column, though — the nearest chord
-       is picked with no bound on distance, and a cross should not be offered
-       from the far side of the staff. */
+    /* A cross under a chord empties it, offered as soon as there is a note
+       of yours in it. Only while the pointer is in that column, though — the
+       nearest chord is picked with no bound on distance, and a cross should
+       not be offered from the far side of the staff. It sits below the
+       spelling rather than above the staff: down there a click can only ever
+       mean the lowest bass note, which stays placeable elsewhere in the
+       column, whereas the space above the treble staff is real soprano
+       pitches and a misplaced click would wipe the chord. */
     var nearColumn = keyboard || hoverNear;
-    var cueSlot = (focus && !drag && nearColumn && slotFull(focus.slot)) ? focus.slot : null;
+    var cueSlot = (focus && !drag && nearColumn && written(focus.slot)) ? focus.slot : null;
     if (cueSlot != null && SLOT_X[cueSlot] != null){
-      var cue = el("text",{x:SLOT_X[cueSlot], y:55, "text-anchor":"middle", "font-size":14,
+      var cue = el("text",{x:SLOT_X[cueSlot], y:268, "text-anchor":"middle", "font-size":14,
                            fill:"var(--wrong)", "font-family":"IBM Plex Sans, sans-serif"});
       var hint = el("title",{});
       hint.textContent = "Clear this chord";
@@ -1128,6 +1187,10 @@
        an empty chord simply passes in silence */
     playBtn.disabled = !state.notes.length;
     if (!state.notes.length && playTimer) stopPlayback();
+    if (tintRunning() && !tintFrame){
+      tintFrame = true;
+      nextFrame(function(){ tintFrame = false; render(); });
+    }
     checkHint.textContent = ready
       ? "Doubling, spacing, crossing, the leading tone and parallels."
       : (state.chords.length && slotCount(0) < MAX_VOICES)
@@ -1715,11 +1778,11 @@
      to. Measuring a box around each notehead instead would reach further than
      the 6px between neighbouring pitches, so clicking the space above a note
      would pick up that note rather than placing a new one. */
-  /* the strip above a full chord's column, where the cue sits */
+  /* the strip below a chord's column, where the cue sits */
   function cueHit(p){
-    if (p.y < 40 || p.y > 60) return null;
+    if (p.y < 257 || p.y > 276) return null;
     var slot = slotAt(p.x);
-    if (SLOT_X[slot] == null || !slotFull(slot)) return null;
+    if (SLOT_X[slot] == null || !written(slot)) return null;
     return Math.abs(p.x - SLOT_X[slot]) <= 26 ? slot : null;
   }
   function hitNote(p){
