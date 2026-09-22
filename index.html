@@ -1085,8 +1085,13 @@
                                        fill:"var(--accent-soft)"}));
     state.notes.forEach(function(n,i){
       if (drag && drag.note === n) return;
+      /* the chord that is sounding colours itself, so the ear and the eye
+         are on the same chord. A note that does not belong stays red
+         through it — being wrong outranks being played. */
       layerNotes.appendChild(noteGroup(n,{
-        color: n.given ? "var(--rule)" : isChordTone(n) ? "var(--ink)" : "var(--wrong)"
+        color: !isChordTone(n) ? "var(--wrong)"
+             : n.slot === playingSlot ? "var(--accent)"
+             : n.given ? "var(--rule)" : "var(--ink)"
       }));
     });
     if (drag) layerGhost.appendChild(noteGroup(drag.note,{color:"var(--accent)",pop:false}));
