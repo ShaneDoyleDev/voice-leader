@@ -331,13 +331,16 @@
     .chip{min-height:44px; padding:10px 12px}
     button.chip{min-height:44px}
     button.chipx{min-width:44px; font-size:14px}
-    /* The staff no longer shrinks to fit, so it has to be pannable. A finger
-       drawn sideways scrolls it; a finger drawn up or down still belongs to
-       the staff, which is what places and moves notes. pan-x hands the
-       browser exactly one axis and keeps the other for the pointer handlers,
-       which is the whole bargain: you cannot drag a note between chords by
-       touch, but you can reach every chord and set every pitch. */
-    .staffwrap{overflow-x:auto; overflow-y:hidden; touch-action:pan-x; padding:6px 0 2px}
+    /* The staff no longer shrinks to fit, so it has to be pannable — and a
+       page you cannot scroll by dragging the biggest thing on it reads as
+       broken, whatever the reason. So the browser gets both axes and the
+       pinch: sideways pans the staff, up and down scrolls the page. What
+       that costs is dragging: once the browser claims a moving finger it
+       sends pointercancel and the gesture is gone. A press that does not
+       move still arrives, which is what touch editing is built on — press
+       to see the preview, lift to place it, hold a note to take it off. */
+    .staffwrap{overflow-x:auto; overflow-y:hidden; padding:6px 0 2px;
+               touch-action:pan-x pan-y pinch-zoom}
     /* the wedges are the smallest thing to aim at, and the inner ring of
        relative minors the smallest of those. The circle takes the whole
        panel, out through the padding either side, which is the difference
@@ -947,9 +950,7 @@
       var row = el("text",{x:SLOT_X[i], y:244, "text-anchor":"middle",
                            "font-family":"IBM Plex Sans, sans-serif", "font-size":10.5});
       var spans = tones.map(function(l, j){
-        var on = count[l] > 0;
-        var sp = el("tspan",{ fill: on ? "var(--accent)" : "var(--ink-soft)",
-                              "font-weight": on ? 600 : 400, dx: j ? 3 : 0 });
+        var sp = el("tspan",{ fill:"var(--ink-soft)", dx: j ? 3 : 0 });
         sp.textContent = letterText(degree, l);
         row.appendChild(sp);
         return sp;
@@ -966,24 +967,6 @@
         } catch (e) { /* no layout yet — the dot reappears on the next render */ }
       }
     });
-
-    /* Not while a note is in hand — the names would chase it around. */
-    var rows = drag ? null : chordVoices();
-    if (rows){
-      [rows[0]].forEach(function(row, slot){       /* the chord that fixes them */
-        if (!row) return;
-        row.forEach(function(n, voice){
-          var t = el("text",{x:SLOT_X[slot] - 28, y:yOf(n.step, n.staff) + 3.5, "text-anchor":"end",
-                             "font-family":"IBM Plex Sans, sans-serif", "font-size":10,
-                             "font-weight":600, "letter-spacing":"0.06em", fill:"var(--ink-soft)"});
-          var title = el("title",{});
-          title.textContent = VOICES[voice];
-          t.appendChild(title);
-          t.appendChild(document.createTextNode(VOICE_SHORT[voice]));
-          layerLabels.appendChild(t);
-        });
-      });
-    }
   }
 
   /* A note pops in when it is placed: it lands a little small and eases up to
@@ -1173,7 +1156,6 @@
     }).join(",") + ")";
   }
   function noteColor(n){
-    if (!isChordTone(n)) return "var(--wrong)";      /* wrong outranks played */
     var base = n.given ? "--rule" : "--ink", t = tintOf(n.slot);
     return t <= 0 ? "var(" + base + ")"
          : t >= 1 ? "var(--accent)"
@@ -1218,10 +1200,6 @@
   var keyboard = false, lastClick = null;
 
   var MAX_VOICES = 4;                      /* one chord, four voices */
-  /* a placed note that is not one of the chord's three tones draws in red */
-  function isChordTone(note){
-    return chordLetters(state.chords[note.slot]).indexOf(note.step % 7) > -1;
-  }
   function slotCount(slot){
     var n = 0;
     state.notes.forEach(function(x){ if (x.slot === slot) n++; });
@@ -2027,6 +2005,9 @@
   });
   svg.addEventListener("pointercancel", function(){
     press = null; drag = null; touching = false; endHold();
+    /* the browser has taken the gesture to scroll with — leave nothing of it
+       on the staff, or the preview sits there after the finger has gone */
+    hover = null; hoverNear = false;
     svg.style.cursor = "crosshair";
     render();
   });
