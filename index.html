@@ -1058,8 +1058,12 @@
        worse than none. A drill's given voice stays put, though — it is not
        yours to clear. */
     var j;
-    if (slot == null) state.marks = {};
-    else for (j = 0; j < 3; j++) delete state.marks[slot + ":" + j];
+    if (slot == null){
+      /* an empty staff is the start again: the ticks go, and so does the
+         ground won — the second chord is earned by checking the first */
+      state.marks = {};
+      open = 0;
+    } else for (j = 0; j < 3; j++) delete state.marks[slot + ":" + j];
     var going = state.notes.filter(function(n){
       return !n.given && (slot == null || n.slot === slot);
     });
