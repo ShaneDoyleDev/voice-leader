@@ -339,6 +339,9 @@
        sends pointercancel and the gesture is gone. A press that does not
        move still arrives, which is what touch editing is built on — press
        to see the preview, lift to place it, hold a note to take it off. */
+    /* the staff is most of a phone screen, so the checkbar would sit below
+       the fold at the moment it has something to say */
+    .checkbar{position:sticky; bottom:0; background:var(--surface); z-index:2}
     .staffwrap{overflow-x:auto; overflow-y:hidden; padding:16px 0 2px;
                touch-action:pan-x pan-y pinch-zoom}
     /* the wedges are the smallest thing to aim at, and the inner ring of
@@ -1319,16 +1322,15 @@
       tintFrame = true;
       nextFrame(function(){ tintFrame = false; render(); });
     }
+    var wants = all ? null : wantsAt(depth);
     checkHint.textContent =
-      depth === 0
-        ? (slotCount(0) === MAX_VOICES
-            ? "The opening chord needs its own tones \u2014 none of them foreign, and none of the three missing."
-            : "The opening chord needs all four voices \u2014 it names them for the rest.")
-      : depth === 1
-        ? "Write the second chord, and the two can be checked together."
-      : all
-        ? "Doubling, spacing, crossing, the leading tone and parallels."
-        : "Everything written so far. Nothing to fix and the next chord opens.";
+      all ? "Doubling, spacing, crossing, the leading tone and parallels."
+      : slotCount(depth) === 0
+        ? (depth === 0 ? "Write the opening chord in all four voices \u2014 it names them for the rest."
+           : depth === 1 ? "Write the second chord, and the two can be checked together."
+           : "Write the next chord, then check again.")
+      : wants ? wants
+      : "Everything written so far. Nothing to fix and the next chord opens.";
   }
 
   var chips = document.getElementById("chips");
@@ -1598,6 +1600,33 @@
     var k = 1;
     while (k < state.chords.length && chordIsClean(k)) k++;
     return k;
+  }
+  /* What the chord being written still wants, in as many words. Nothing on
+     the staff is marked wrong any more, so a note outside the chord or a
+     missing third would otherwise just leave the button quietly absent. */
+  function wantsAt(slot){
+    if (slot == null || slot >= state.chords.length) return null;
+    var degree = state.chords[slot], tones = chordLetters(degree);
+    var notes = notesIn(slot), seen = {}, stray = null, i, l;
+    var name = slot === 0 ? "The opening chord" : "This chord";
+    for (i = 0; i < notes.length; i++){
+      l = notes[i].step % 7;
+      if (tones.indexOf(l) < 0){ if (stray == null) stray = l; }
+      else seen[l] = (seen[l] || 0) + 1;
+    }
+    if (stray != null)
+      return name + " has a note that is not one of its tones: " + LETTERS[stray] +
+             " is not in " + spell(degree) + ".";
+    if (notes.length < 3)
+      return name + " needs three notes or four \u2014 it has " + notes.length + ".";
+    if (!seen[tones[0]]) return name + " is missing its root, " + letterText(degree, tones[0]) + ".";
+    if (!seen[tones[1]]) return name + " is missing its third, " + letterText(degree, tones[1]) + ".";
+    if (needsFifth(slot) && !seen[tones[2]])
+      return name + " is missing its fifth, " + letterText(degree, tones[2]) +
+             " \u2014 a diminished triad cannot do without it.";
+    if (slot === 0 && notes.length < MAX_VOICES)
+      return "The opening chord needs all four voices \u2014 it names them for the rest.";
+    return null;
   }
   /* Four-part writing is done a chord at a time, and a mistake in the second
      chord is worth knowing about before the fifth is written on top of it.
