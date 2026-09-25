@@ -1193,7 +1193,10 @@
     }).join(",") + ")";
   }
   function noteColor(n){
-    if (!isChordTone(n)) return "var(--wrong)";      /* wrong outranks played */
+    /* A wrong note is marked when the checklist says so, not while it is
+       being written — the staff stays plain notation until it is checked,
+       and editing anything clears the report and the red with it. */
+    if (report && n.slot < report.depth && !isChordTone(n)) return "var(--wrong)";
     var base = n.given ? "--rule" : "--ink", t = tintOf(n.slot);
     return t <= 0 ? "var(" + base + ")"
          : t >= 1 ? "var(--accent)"
@@ -1265,6 +1268,10 @@
     [layerNotes, layerGhost, layerSlot].forEach(function(l){
       while (l.firstChild) l.removeChild(l.firstChild);
     });
+    /* first, whether the last report still describes the staff: the notes
+       below are drawn in its colours, so it cannot be tested after them */
+    if (report && reportKey !== notesKey()) report = null;
+    if (!report) flowAt = null;
     tintVars = null;                       /* re-read the palette, in case the theme moved */
     if (playingSlot !== tintTo){            /* a chord started or stopped sounding */
       tintFrom = tintTo; tintTo = playingSlot; tintAt = performance.now();
@@ -1313,12 +1320,10 @@
     drawRipple();
     drawFading();
     renderChips();
-    if (report && reportKey !== notesKey()) report = null;   /* edited since — stale */
-    if (!report) flowAt = null;
     renderReport();
     var depth = writtenDepth(), all = depth === state.chords.length;
     checkBtn.hidden = depth < 2;
-    checkBtn.textContent = all ? "Check voice leading" : "Check the chords so far";
+    checkBtn.textContent = all ? "Check voice leading" : "Proceed";
     /* Play stays up throughout, so a part-written progression can be heard;
        an empty chord simply passes in silence */
     playBtn.disabled = !state.notes.length;
