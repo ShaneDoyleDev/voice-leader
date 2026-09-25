@@ -1412,7 +1412,7 @@
       box.type = "button";
       box.className = "chip" + (slot === playingSlot ? " playing" : "");
       box.setAttribute("data-slot", slot);
-      if (chordIsClean(slot)){
+      if (filled(slot)){          /* hearing it is not a reward for writing it correctly */
         box.title = "Play this chord";
         box.addEventListener("click", function(){ playSlot(slot); });
       } else {
@@ -1507,6 +1507,15 @@
      go — and neither can the fifth of a diminished triad, which is the
      interval the chord is named for. */
   function needsFifth(slot){ return quality(state.chords[slot]) === "dim"; }
+  /* Root position only, for now. Inversions are a thing the app can read —
+     inversionOf() figures a chord off whatever is lowest — but not yet a
+     thing it accepts, so the lowest note has to be the root and no figure
+     ever appears on a chord that is right. */
+  function rootInBass(slot){
+    var notes = notesIn(slot);
+    if (!notes.length) return true;
+    return notes[0].step % 7 === chordLetters(state.chords[slot])[0];
+  }
   function chordIsClean(slot){
     var count = slotCount(slot);
     if (slot >= state.chords.length || count < 3 || count > MAX_VOICES) return false;
@@ -1516,6 +1525,7 @@
       if (tones.indexOf(letter) === -1) return false;          /* a note outside the chord */
       seen[letter] = true;
     }
+    if (!rootInBass(slot)) return false;
     return !!(seen[tones[0]] && seen[tones[1]] && (!needsFifth(slot) || seen[tones[2]]));
   }
   /* the letters name four parts, so they wait for four notes */
@@ -1682,6 +1692,10 @@
     if (needsFifth(slot) && !seen[tones[2]])
       return name + " is missing its fifth, " + letterText(degree, tones[2]) +
              " \u2014 a diminished triad cannot do without it.";
+    if (!rootInBass(slot))
+      return name + " has " + nameAt(slot, notes[0].step) + " at the bottom \u2014 " +
+             "only root position for now, so the lowest note wants to be " +
+             letterText(degree, tones[0]) + ".";
     if (slot === 0 && notes.length < MAX_VOICES)
       return "The opening chord needs all four voices \u2014 it names them for the rest.";
     return null;
@@ -1727,6 +1741,13 @@
         add("error", VOICES[idx] + " is on " + n.name + ", which is not one of this chord's tones \u2014 " +
             spell(degree) + ".", n.name);
       });
+
+      /* root position only, for now */
+      var low = v.reduce(function(x, y){ return y.midi < x.midi ? y : x; });
+      if (tones.indexOf(low.letter) > -1 && low.letter !== tones[0])
+        add("error", "The bass is on " + low.name + ", the " + ROLES[tones.indexOf(low.letter)] +
+            " of the chord \u2014 only root position for now, so the lowest note wants to be " +
+            letterText(degree, tones[0]) + ".", "root position");
 
       /* completeness — the fifth is the one tone that may be left out */
       tones.forEach(function(l, idx){
