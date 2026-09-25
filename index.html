@@ -840,9 +840,32 @@
   function markCount(slot){
     return slot < state.chords.length ? chordLetters(state.chords[slot]).length : 3;
   }
+  /* Eight chords on a wide screen leave about sixty units a chord, and four
+     tones spread across all of it run into the next chord's. So the row is
+     sized to leave a real gutter between one chord and the next, and takes a
+     smaller letter when even that is tight. */
+  /* Eight chords on a wide screen leave about sixty units a chord, and four
+     tones spread across all of it run into the next chord's. The row is
+     sized so that the whole group — its letters and the ground under them —
+     leaves a real gutter before the next chord begins, which means measuring
+     from the outside of the outer letters rather than from their centres.
+     Where even that is tight the letters take a smaller size. */
+  var MARK_GUTTER = 20;
+  function markSize(slot){
+    var gap = SLOT_X.length > 1 ? SLOT_X[1] - SLOT_X[0] : 108;
+    return gap / Math.max(1, markCount(slot)) < 24 ? 11 : 13.5;
+  }
+  /* half an outer letter, plus the ground's own margin: the chip hugs the
+     letters so the width it costs is the letters and not much else */
+  function markPad(slot){ return markSize(slot) * 0.5 + 7; }
   function markSpread(slot){
     var gap = SLOT_X.length > 1 ? SLOT_X[1] - SLOT_X[0] : 108;
-    return Math.max(15, Math.min(28, (gap - 8) / Math.max(1, markCount(slot) - 1)));
+    var room = gap - MARK_GUTTER - markPad(slot);
+    return Math.max(markSize(slot) + 1.5,
+                    Math.min(26, room / Math.max(1, markCount(slot) - 1)));
+  }
+  function markWidth(slot){
+    return markSpread(slot) * (markCount(slot) - 1) + markPad(slot);
   }
   function markX(slot, j){
     return SLOT_X[slot] + (j - (markCount(slot) - 1) / 2) * markSpread(slot);
@@ -1023,10 +1046,15 @@
       }
       layerLabels.appendChild(t);
 
+      /* a ground of its own under each chord's tones, so a row of them reads
+         as one group to a chord rather than a line of letters */
+      var wide = markWidth(i);
+      layerLabels.appendChild(el("rect",{x:SLOT_X[i] - wide / 2, y:2, width:wide, height:31,
+                                         rx:3, fill:"var(--chip)", opacity:dim}));
       tones.forEach(function(l, j){
         var on = markOf(i, j), x = markX(i, j);
         var sp = el("text",{x:x, y:MARK_Y, "text-anchor":"middle",
-                            "font-family":"IBM Plex Sans, sans-serif", "font-size":13.5,
+                            "font-family":"IBM Plex Sans, sans-serif", "font-size":markSize(i),
                             "font-weight": on ? 600 : 400, opacity:dim,
                             fill: on ? "var(--accent)" : "var(--ink-soft)"});
         var hint = el("title",{});
