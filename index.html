@@ -384,6 +384,7 @@
       <div class="seq" id="seq"></div>
       <p class="keyline" id="progline"></p>
       <div class="row">
+        <button type="button" id="btn-seventh" aria-pressed="false">Sevenths</button>
         <span class="spacer"></span>
         <button type="button" class="ghost" id="undo">Undo</button>
         <button type="button" class="ghost" id="clearprog">Clear</button>
@@ -546,33 +547,58 @@
   /* the chords that borrow the raised leading tone in minor: V and vii-dim.
      Everything else stays diatonic to the natural minor scale, so III keeps
      its lowered seventh and reads as a major triad.                       */
-  function raisesLeadingTone(degree){
-    return state.mode === "minor" && (degree === 5 || degree === 7);
+  function raisesLeadingTone(chord){
+    var d = deg(chord);
+    return state.mode === "minor" && (d === 5 || d === 7);
   }
+  /* A chord is a number: 1 to 7 for the triad on that degree, and the same
+     plus seven for the seventh chord on it. Everything below reads the
+     degree through deg() and the fourth tone through hasSeventh(), so the
+     rest of the file goes on passing chords about as plain numbers. */
+  function deg(chord){ return ((chord - 1) % 7) + 1; }
+  function hasSeventh(chord){ return chord > 7; }
   /* quality is measured off the spelling, so it can never disagree with it */
-  function quality(degree){
-    var ls = chordLetters(degree);
-    var semis = ls.map(function(l, i){
-      var v = SEMIS[l] + alterFor(degree, l);
-      return i === 0 ? v : v + (v < SEMIS[ls[0]] + alterFor(degree, ls[0]) ? 12 : 0);
-    });
+  function quality(chord){
+    var ls = chordLetters(chord);
+    var semis = chordSemis(chord, ls);
     var third = semis[1] - semis[0], fifth = semis[2] - semis[0];
     if (third === 4 && fifth === 8) return "aug";
     if (third === 3 && fifth === 6) return "dim";
     return third === 3 ? "min" : "maj";
   }
-  function numeralOf(degree){
-    var roman = ROMAN[degree - 1], q = quality(degree);
+  function chordSemis(chord, ls){
+    var root = SEMIS[ls[0]] + alterFor(chord, ls[0]);
+    return ls.map(function(l, i){
+      var v = SEMIS[l] + alterFor(chord, l);
+      return i === 0 ? v : v + (v < root ? 12 : 0);
+    });
+  }
+  /* the seventh itself: minor, major, or the diminished seventh that makes a
+     fully diminished chord out of a diminished triad */
+  function seventhKind(chord){
+    if (!hasSeventh(chord)) return null;
+    var ls = chordLetters(chord), semis = chordSemis(chord, ls);
+    var sev = semis[3] - semis[0];
+    return sev === 9 ? "d7" : sev === 10 ? "m7" : "M7";
+  }
+  function numeralOf(chord){
+    var roman = ROMAN[deg(chord) - 1], q = quality(chord);
     if (q === "min" || q === "dim") roman = roman.toLowerCase();
-    return roman + (q === "dim" ? "\u00B0" : q === "aug" ? "+" : "");
+    var mark = q === "dim" ? "\u00B0" : q === "aug" ? "+" : "";
+    if (!hasSeventh(chord)) return roman + mark;
+    /* a diminished triad under a minor seventh is the half-diminished sign */
+    if (q === "dim") mark = seventhKind(chord) === "d7" ? "\u00B0" : "\u00F8";
+    return roman + mark + "7";
   }
-  function alterFor(degree, letter){
+  function alterFor(chord, letter){
     var base = keyAlters()[letter];
-    return (raisesLeadingTone(degree) && letter === leadingLetter()) ? base + 1 : base;
+    return (raisesLeadingTone(chord) && letter === leadingLetter()) ? base + 1 : base;
   }
-  function chordLetters(degree){
-    var root = (tonicLetter() + degree - 1) % 7;
-    return [root, (root + 2) % 7, (root + 4) % 7];
+  function chordLetters(chord){
+    var root = (tonicLetter() + deg(chord) - 1) % 7;
+    var ls = [root, (root + 2) % 7, (root + 4) % 7];
+    if (hasSeventh(chord)) ls.push((root + 6) % 7);
+    return ls;
   }
   /* spell a letter under a chord; a raised leading tone that the signature
      flats is written with a natural, not a bare letter */
@@ -802,11 +828,16 @@
   /* the band stops just short of 36, which is where C6 itself is written —
      the top ledger line stays clickable */
   var MARK_Y = 27, MARK_DOT_Y = 10, MARK_BAND = 33;
-  function markSpread(){
-    var gap = SLOT_X.length > 1 ? SLOT_X[1] - SLOT_X[0] : 108;
-    return Math.max(16, Math.min(28, (gap - 8) / 3));
+  function markCount(slot){
+    return slot < state.chords.length ? chordLetters(state.chords[slot]).length : 3;
   }
-  function markX(slot, j){ return SLOT_X[slot] + (j - 1) * markSpread(); }
+  function markSpread(slot){
+    var gap = SLOT_X.length > 1 ? SLOT_X[1] - SLOT_X[0] : 108;
+    return Math.max(15, Math.min(28, (gap - 8) / Math.max(1, markCount(slot) - 1)));
+  }
+  function markX(slot, j){
+    return SLOT_X[slot] + (j - (markCount(slot) - 1) / 2) * markSpread(slot);
+  }
   function markOf(slot, j){ return state.marks[slot + ":" + j] || 0; }
   function markBump(slot, j){
     state.marks[slot + ":" + j] = (markOf(slot, j) + 1) % 3;
@@ -815,9 +846,10 @@
      letter — underneath it there is nothing but the top of the canvas */
   function markHit(p){
     if (p.y > MARK_BAND) return null;
-    var slot = slotAt(p.x), half = markSpread() / 2 + 3, j;
+    var slot = slotAt(p.x), j;
     if (SLOT_X[slot] == null) return { slot:slot, idx:-1 };
-    for (j = 0; j < 3; j++)
+    var half = markSpread(slot) / 2 + 3;
+    for (j = 0; j < markCount(slot); j++)
       if (Math.abs(p.x - markX(slot, j)) <= half) return { slot:slot, idx:j };
     return { slot:slot, idx:-1 };
   }
@@ -958,7 +990,8 @@
         if (n.slot === i) count[n.step % 7] = (count[n.step % 7] || 0) + 1;
       });
       var complete = count[tones[0]] > 0 && count[tones[1]] > 0 &&
-                     (!needsFifth(i) || count[tones[2]] > 0);   /* fifth optional, except diminished */
+                     (!needsFifth(i) || count[tones[2]] > 0) &&
+                     (tones.length < 4 || count[tones[3]] > 0);  /* fifth optional; the seventh is not */
 
       /* a chord you have not reached yet is drawn faintly: it is where the
          progression is going, not where you are */
@@ -1467,7 +1500,7 @@
      assumption the spacing and parallel rules are stated under. */
   var VOICES = ["Bass", "Tenor", "Alto", "Soprano"];
   var VOICE_SHORT = ["B", "T", "A", "S"];
-  var ROLES = ["root", "third", "fifth"];
+  var ROLES = ["root", "third", "fifth", "seventh"];
 
   /* Name an interval the way a theory class would: the diatonic distance
      gives the number, the semitones give the quality. */
@@ -1526,6 +1559,9 @@
       seen[letter] = true;
     }
     if (!rootInBass(slot)) return false;
+    /* the fifth is the one tone that may go — and in a seventh chord the
+       seventh is the least dispensable of all, being what names it */
+    if (tones.length > 3 && !seen[tones[3]]) return false;
     return !!(seen[tones[0]] && seen[tones[1]] && (!needsFifth(slot) || seen[tones[2]]));
   }
   /* the letters name four parts, so they wait for four notes */
@@ -1692,6 +1728,9 @@
     if (needsFifth(slot) && !seen[tones[2]])
       return name + " is missing its fifth, " + letterText(degree, tones[2]) +
              " \u2014 a diminished triad cannot do without it.";
+    if (tones.length > 3 && !seen[tones[3]])
+      return name + " is missing its seventh, " + letterText(degree, tones[3]) +
+             " \u2014 the note the chord is named for.";
     if (!rootInBass(slot))
       return name + " has " + nameAt(slot, notes[0].step) + " at the bottom \u2014 " +
              "only root position for now, so the lowest note wants to be " +
@@ -1750,18 +1789,23 @@
             letterText(degree, tones[0]) + ".", "root position");
 
       /* completeness — the fifth is the one tone that may be left out */
+      var seventh = tones.length > 3;
       tones.forEach(function(l, idx){
         if (counts[l]) return;
         if (idx < 2){
           add("error", "Missing its " + ROLES[idx] + ", " + letterText(degree, l) + ".");
+        } else if (idx === 3){
+          add("error", "Missing its seventh, " + letterText(degree, l) +
+              " \u2014 the note the chord is named for; without it this is a triad.");
         } else if (needsFifth(slot)){
           add("error", "Missing its fifth, " + letterText(degree, l) +
               " \u2014 a diminished triad cannot do without it; the diminished fifth is what makes it one.");
-        } else if (counts[tones[0]] > 2){
-          add("ok", "No fifth, root tripled \u2014 the usual way to leave it out.");
+        } else if (counts[tones[0]] > (seventh ? 1 : 2)){
+          add("ok", "No fifth, root " + (seventh ? "doubled" : "tripled") +
+              " \u2014 the usual way to leave it out.");
         } else {
-          add("caution", "No fifth, and the root is not tripled \u2014 when the fifth goes, " +
-              "the root normally takes its place.");
+          add("caution", "No fifth, and the root is not " + (seventh ? "doubled" : "tripled") +
+              " \u2014 when the fifth goes, the root normally takes its place.");
         }
       });
 
@@ -1775,7 +1819,11 @@
         if (!(counts[l] > 1)) return;
         var what = (counts[l] > 2 ? "Three copies of the " : "Doubles the ") +
                    ROLES[idx] + ", " + letterText(degree, l);
-        if (idx === 1 && quality(degree) === "min" && counts[l] === 2)
+        if (idx === 3){
+          add("error", what + " \u2014 a seventh is a dissonance and wants one voice; " +
+              "both copies would have to fall by step.", "seventh");
+        }
+        else if (idx === 1 && quality(degree) === "min" && counts[l] === 2)
           add("ok", what + " \u2014 ordinary in a minor triad.");
         else if (idx === 1)
           add("caution", what + " \u2014 the weaker double; the root or the fifth is the safer choice.");
@@ -1783,7 +1831,7 @@
       });
 
       /* the leading tone doubled in a dominant */
-      if (degree === 5 && counts[leadingLetter()] > 1)
+      if (deg(degree) === 5 && counts[leadingLetter()] > 1)
         add("caution", "The leading tone " + letterText(degree, leadingLetter()) +
             " is doubled \u2014 watch it on the next move: one copy still has to rise.");
 
@@ -1875,8 +1923,28 @@
               "overlapped");
       }
 
+      /* The seventh falls by step. It is the whole reason the chord is
+         called one: a dissonance that leans downward, and the voice holding
+         it has one move. Held as a common tone it is only a caution — the
+         next chord goes on owing the resolution — but anything else is the
+         mistake a seventh exists to teach. */
+      if (hasSeventh(state.chords[i])){
+        var sev = chordLetters(state.chords[i])[3];
+        a.forEach(function(n, idx){
+          if (n.letter !== sev) return;
+          var to = b[idx];
+          if (to.step === n.step - 1) return;                   /* fell a step: the whole rule */
+          if (to.midi === n.midi)
+            add("caution", VOICES[idx] + " holds the seventh, " + n.name +
+                " \u2014 it is still owed its step down.", "holds the seventh");
+          else
+            add("error", VOICES[idx] + " has the seventh, " + n.name +
+                ", which has to fall by step; it goes to " + to.name + ".", "fall by step");
+        });
+      }
+
       /* the leading tone, whenever a dominant goes to the tonic */
-      if (state.chords[i] === 5 && state.chords[i + 1] === 1){
+      if (deg(state.chords[i]) === 5 && deg(state.chords[i + 1]) === 1){
         var lt = leadingLetter(), tonic = tonicLetter(), fifth = chordLetters(1)[2];
         var carriers = [];
         a.forEach(function(n, idx){ if (n.letter === lt) carriers.push(idx); });
@@ -2439,18 +2507,25 @@
     svgC.appendChild(miniStave(keyAcc()));
     circle.appendChild(svgC);
   }
+  /* The seven numerals build triads or seventh chords depending on the
+     toggle beside them: a chord is the degree, or the degree plus seven. The
+     buttons show which they are making, spelling and all. */
+  var sevenths = false;
   function drawNumerals(){
     numerals.innerHTML = "";
     DEGREES.forEach(function(degree){
+      var chord = degree + (sevenths ? 7 : 0);
       var b = document.createElement("button");
       b.type = "button";
-      b.innerHTML = numeralOf(degree) + "<small>" + spell(degree) + "</small>";
+      b.innerHTML = numeralOf(chord) + "<small>" + spell(chord) + "</small>";
       b.disabled = state.chords.length >= MAX_CHORDS;
       b.addEventListener("click", function(){
-        if (state.chords.length < MAX_CHORDS){ state.chords.push(degree); drawSetup(); }
+        if (state.chords.length < MAX_CHORDS){ state.chords.push(chord); drawSetup(); }
       });
       numerals.appendChild(b);
     });
+    var t = document.getElementById("btn-seventh");
+    t.setAttribute("aria-pressed", String(sevenths));
   }
   function drawSeq(){
     seq.innerHTML = "";
@@ -2494,6 +2569,10 @@
         " in " + keyName() + ".";
   }
 
+  document.getElementById("btn-seventh").addEventListener("click", function(){
+    sevenths = !sevenths;
+    drawSetup();
+  });
   document.getElementById("undo").addEventListener("click", function(){ state.chords.pop(); drawSetup(); });
   document.getElementById("clearprog").addEventListener("click", function(){ state.chords = []; drawSetup(); });
 
