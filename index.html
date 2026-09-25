@@ -306,6 +306,12 @@
     color:var(--ink-soft); letter-spacing:.08em; margin-right:3px; vertical-align:.32em;
   }
   .empty{margin:0;color:var(--ink-soft);font-style:italic}
+  #exporttext{                           /* only seen if the clipboard refuses */
+    display:block; width:100%; height:180px; margin:0; padding:10px 12px;
+    border:0; border-top:1px solid var(--line); background:var(--chip);
+    color:var(--ink); font:400 12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;
+    resize:vertical;
+  }
   @media (prefers-reduced-motion: no-preference){ #ghost{transition:opacity .12s ease} }
 
   /* ---------- a phone ------------------------------------------------------
@@ -432,8 +438,11 @@
           <output id="tempoval" for="tempo">60 bpm</output>
         </label>
         <span class="spacer"></span>
+        <button type="button" id="btn-export" class="ghost"
+                title="Copy the key, the progression and every voice as text">Export</button>
         <button type="button" id="btn-clear" class="ghost">Clear notes</button>
       </div>
+      <textarea id="exporttext" readonly hidden aria-label="The exercise as text"></textarea>
       <div class="checkbar">
         <button type="button" id="check" hidden>Check voice leading</button>
         <p id="checkhint"></p>
@@ -2646,6 +2655,94 @@
     stage.hidden = true;
     setup.hidden = false;
     drawSetup();
+  });
+
+  /* ---------- the exercise as text ----------------------------------------
+     Everything on the staff written out to be read: the key, the
+     progression, every voice of every chord by name, and whatever the
+     checklist last said. It is the exercise rather than a dump of the
+     state — the point is to hand it to someone (or something) that can
+     read music and be asked what it thinks. */
+  function padTo(str, n){
+    while (str.length < n) str += " ";
+    return str;
+  }
+  function blockLabel(label){
+    return label.map(function(part){
+      return typeof part === "number"
+        ? (part + 1) + " " + numeralOf(state.chords[part])
+        : part;
+    }).join("");
+  }
+  function exportText(){
+    var rows = chordVoices(), out = [], v;
+    out.push("A four-part writing exercise, from Voice Leader.");
+    out.push("");
+    out.push("Key: " + keyName() + " (" + sigText() + ")");
+    out.push("Progression: " + state.chords.map(numeralOf).join(" \u2013 "));
+    out.push("");
+    state.chords.forEach(function(chord, slot){
+      var head = (slot + 1) + ". " + numeralOf(chord) + "  \u2014  " + spell(chord);
+      var notes = notesIn(slot), row = rows && rows[slot];
+      if (!notes.length){ out.push(head + "  \u2014  not written yet"); return; }
+      out.push(head);
+      if (row){
+        for (v = MAX_VOICES - 1; v >= 0; v--)
+          out.push("     " + padTo(VOICES[v], 9) + row[v].name);
+      } else {
+        /* fewer than four notes, so no voices have been worked out: bottom
+           up is all that can honestly be said */
+        notes.slice().reverse().forEach(function(n){
+          out.push("     " + padTo("", 9) + nameAt(slot, n.step));
+        });
+        out.push("     (" + notes.length + " notes so far, voices not yet fixed)");
+      }
+    });
+    if (report){
+      out.push("");
+      out.push("Voice Leader's own checklist, over the first " +
+               report.depth + (report.depth === 1 ? " chord:" : " chords:"));
+      out.push("  " + document.getElementById("verdict").textContent);
+      report.blocks.forEach(function(b){
+        b.items.forEach(function(item){
+          out.push("  \u2022 [" + item.level + "] " + blockLabel(b.label) + " \u2014 " + item.text);
+        });
+      });
+    } else {
+      out.push("");
+      out.push("Not checked in the app yet.");
+    }
+    out.push("");
+    out.push("What is the voice leading like? Doubling, spacing, crossing and overlap, " +
+             "the leading tone, any seventh's resolution, and parallel fifths, octaves or unisons.");
+    return out.join("\n");
+  }
+  function flashExport(word){
+    var b = document.getElementById("btn-export");
+    b.textContent = word;
+    setTimeout(function(){ b.textContent = "Export"; }, 1600);
+  }
+  /* the old way, for where the clipboard is not given — and if even that is
+     refused, the text is put on screen to be copied by hand */
+  function copyTheOldWay(text){
+    var ta = document.getElementById("exporttext"), ok = false;
+    ta.value = text;
+    ta.hidden = false;
+    ta.select();
+    try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+    if (ok) ta.hidden = true;
+    flashExport(ok ? "Copied" : "Copy it from below");
+  }
+  document.getElementById("btn-export").addEventListener("click", function(){
+    var text = exportText();
+    document.getElementById("exporttext").hidden = true;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText)
+        return navigator.clipboard.writeText(text).then(
+          function(){ flashExport("Copied"); },
+          function(){ copyTheOldWay(text); });
+    } catch (e) { /* down to the old way */ }
+    copyTheOldWay(text);
   });
 
   /* ---------- toolbar --------------------------------------------------------- */
