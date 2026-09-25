@@ -187,7 +187,7 @@
   .stagehead .spacer{flex:1 1 auto}
 
   .staffwrap{
-    display:block; padding:6px 4px 2px; cursor:crosshair;
+    display:block; padding:18px 4px 2px; cursor:crosshair;
     touch-action:none; outline:none;
     user-select:none; -webkit-user-select:none;   /* a double click removes, never selects */
   }
@@ -339,7 +339,7 @@
        sends pointercancel and the gesture is gone. A press that does not
        move still arrives, which is what touch editing is built on — press
        to see the preview, lift to place it, hold a note to take it off. */
-    .staffwrap{overflow-x:auto; overflow-y:hidden; padding:6px 0 2px;
+    .staffwrap{overflow-x:auto; overflow-y:hidden; padding:16px 0 2px;
                touch-action:pan-x pan-y pinch-zoom}
     /* the wedges are the smallest thing to aim at, and the inner ring of
        relative minors the smallest of those. The circle takes the whole
@@ -798,10 +798,10 @@
      line C6 can reach, so nothing on the staff is underneath it. */
   /* the band stops just short of 36, which is where C6 itself is written —
      the top ledger line stays clickable */
-  var MARK_Y = 26, MARK_DOT_Y = 11, MARK_BAND = 33;
+  var MARK_Y = 27, MARK_DOT_Y = 10, MARK_BAND = 33;
   function markSpread(){
     var gap = SLOT_X.length > 1 ? SLOT_X[1] - SLOT_X[0] : 108;
-    return Math.max(15, Math.min(25, (gap - 10) / 3));
+    return Math.max(16, Math.min(28, (gap - 8) / 3));
   }
   function markX(slot, j){ return SLOT_X[slot] + (j - 1) * markSpread(); }
   function markOf(slot, j){ return state.marks[slot + ":" + j] || 0; }
@@ -957,10 +957,13 @@
       var complete = count[tones[0]] > 0 && count[tones[1]] > 0 &&
                      (!needsFifth(i) || count[tones[2]] > 0);   /* fifth optional, except diminished */
 
+      /* a chord you have not reached yet is drawn faintly: it is where the
+         progression is going, not where you are */
+      var dim = locked(i) ? 0.32 : 1;
       var t = el("text",{x:SLOT_X[i], y:228, fill: complete ? "var(--accent)" : "var(--ink)",
                          "text-anchor":"middle", "font-family":"Spectral, Georgia, serif",
                          "font-size":16, "font-weight": complete ? 600 : 500,
-                         "letter-spacing":"0.04em"});
+                         "letter-spacing":"0.04em", opacity:dim});
       t.appendChild(document.createTextNode(numeralOf(degree)));
       var fig = inversionOf(i);
       if (fig){
@@ -978,8 +981,8 @@
       tones.forEach(function(l, j){
         var on = markOf(i, j), x = markX(i, j);
         var sp = el("text",{x:x, y:MARK_Y, "text-anchor":"middle",
-                            "font-family":"IBM Plex Sans, sans-serif", "font-size":11.5,
-                            "font-weight": on ? 600 : 400,
+                            "font-family":"IBM Plex Sans, sans-serif", "font-size":13.5,
+                            "font-weight": on ? 600 : 400, opacity:dim,
                             fill: on ? "var(--accent)" : "var(--ink-soft)"});
         var hint = el("title",{});
         hint.textContent = on === 2 ? "Doubled \u2014 press to clear"
@@ -988,7 +991,8 @@
         sp.appendChild(document.createTextNode(letterText(degree, l)));
         layerLabels.appendChild(sp);
         if (on === 2)
-          layerLabels.appendChild(el("circle",{cx:x, cy:MARK_DOT_Y, r:2, fill:"var(--accent)"}));
+          layerLabels.appendChild(el("circle",{cx:x, cy:MARK_DOT_Y, r:2.2,
+                                               fill:"var(--accent)", opacity:dim}));
       });
     });
   }
@@ -1046,11 +1050,16 @@
     })();
   }
   function clearNotes(slot){
-    /* a drill's given voice stays put; clearing is for what you wrote */
+    /* The ticks above the staff go with the notes: clearing a chord is
+       starting it again, and a plan for a voicing you have abandoned is
+       worse than none. A drill's given voice stays put, though — it is not
+       yours to clear. */
+    var j;
+    if (slot == null) state.marks = {};
+    else for (j = 0; j < 3; j++) delete state.marks[slot + ":" + j];
     var going = state.notes.filter(function(n){
       return !n.given && (slot == null || n.slot === slot);
     });
-    if (!going.length) return;
     state.notes = state.notes.filter(function(n){ return going.indexOf(n) === -1; });
     driftAway(going);
     render();
@@ -1105,7 +1114,8 @@
     var now = performance.now(), running = false, half = glyphW("noteheadBlack", S) / 2;
     var clean = !report.errors;            /* nothing to fix — draw the lines themselves */
     var shown = 0, i, v, voices;
-    for (i = 0; i + 1 < rows.length; i++){
+    var reach = Math.min(rows.length, report.depth || rows.length);
+    for (i = 0; i + 1 < reach; i++){
       var a = rows[i], b = rows[i + 1];
       if (!a || !b) continue;
       voices = clean ? [0, 1, 2, 3] : parallelVoicesAt(i);
@@ -1265,7 +1275,8 @@
     if (drag)
       layerGhost.appendChild(noteGroup(drag.note,{color:"var(--accent)", pop:false,
         name: touching ? nameAt(drag.note.slot, drag.note.step) : null}));
-    else if (focus && indexAt(focus.slot, focus.step) === -1 && !slotFull(focus.slot))
+    else if (focus && indexAt(focus.slot, focus.step) === -1 && !slotFull(focus.slot) &&
+             !locked(focus.slot))
       layerGhost.appendChild(noteGroup(focus,{color:"var(--accent)", opacity:0.55, pop:false,
         name: touching ? nameAt(focus.slot, focus.step) : null}));
 
@@ -1297,8 +1308,9 @@
     if (report && reportKey !== notesKey()) report = null;   /* edited since — stale */
     if (!report) flowAt = null;
     renderReport();
-    var ready = allVoiced();
-    checkBtn.hidden = !ready;
+    var depth = writtenDepth(), all = depth === state.chords.length;
+    checkBtn.hidden = depth < 2;
+    checkBtn.textContent = all ? "Check voice leading" : "Check the chords so far";
     /* Play stays up throughout, so a part-written progression can be heard;
        an empty chord simply passes in silence */
     playBtn.disabled = !state.notes.length;
@@ -1307,12 +1319,16 @@
       tintFrame = true;
       nextFrame(function(){ tintFrame = false; render(); });
     }
-    checkHint.textContent = ready
-      ? "Doubling, spacing, crossing, the leading tone and parallels."
-      : (state.chords.length && slotCount(0) < MAX_VOICES)
-        ? "The opening chord needs all four voices \u2014 it names them for the rest."
-        : "Every chord needs its own tones \u2014 three notes or four, none of them foreign \u2014 " +
-          "before the checklist can run.";
+    checkHint.textContent =
+      depth === 0
+        ? (slotCount(0) === MAX_VOICES
+            ? "The opening chord needs its own tones \u2014 none of them foreign, and none of the three missing."
+            : "The opening chord needs all four voices \u2014 it names them for the rest.")
+      : depth === 1
+        ? "Write the second chord, and the two can be checked together."
+      : all
+        ? "Doubling, spacing, crossing, the leading tone and parallels."
+        : "Everything written so far. Nothing to fix and the next chord opens.";
   }
 
   var chips = document.getElementById("chips");
@@ -1320,7 +1336,10 @@
   var playBtn = document.getElementById("play");
   playBtn.addEventListener("click", playProgression);
   checkBtn.addEventListener("click", function(){
-    report = runChecks();
+    var depth = writtenDepth();
+    if (depth < 2) return;
+    report = runChecks(depth);
+    if (!report.errors) openTo(depth);      /* nothing to fix — the next chord is yours */
     reportKey = notesKey();
     flowAt = performance.now() - (reducedMotion() ? 1e6 : 0);
     render();          /* starts the lines drawing; renderReport alone would not */
@@ -1570,18 +1589,31 @@
     var fig = inversionOf(slot);
     if (fig) node.appendChild(figureNode(fig));
   }
-  /* The checklist is about voice leading, so it waits until every chord is a
-     chord: its own tones, nothing foreign, nothing missing. The opening
-     chord is held to four notes whatever else it has, since it is the chord
-     that names the voices the rest are read against. */
-  function allVoiced(){
-    if (!state.chords.length || slotCount(0) !== MAX_VOICES) return false;
-    for (var i = 0; i < state.chords.length; i++) if (!chordIsClean(i)) return false;
-    return true;
+  /* How many chords from the start are written: each one its own tones,
+     nothing foreign, nothing missing, and the opening chord in four voices
+     whatever else it has, since it is the chord that names the voices the
+     rest are read against. */
+  function writtenDepth(){
+    if (!state.chords.length || slotCount(0) !== MAX_VOICES || !chordIsClean(0)) return 0;
+    var k = 1;
+    while (k < state.chords.length && chordIsClean(k)) k++;
+    return k;
+  }
+  /* Four-part writing is done a chord at a time, and a mistake in the second
+     chord is worth knowing about before the fifth is written on top of it.
+     So the checklist runs on whatever is written so far, from the second
+     chord on, and the progression opens one chord at a time: the next is
+     available once everything before it has come back with nothing to fix.
+     The frontier only ever moves forward — going back to revise an earlier
+     chord clears the report, but it does not shut the door behind you. */
+  var open = 1;
+  function locked(slot){ return slot > open; }
+  function openTo(depth){
+    open = Math.max(open, Math.min(depth, state.chords.length - 1));
   }
 
-  function runChecks(){
-    var report = { blocks:[], parallels:[], errors:0, cautions:0 };
+  function runChecks(depth){
+    var report = { blocks:[], parallels:[], errors:0, cautions:0, depth:depth };
     function block(label, sub){
       var b = { label:label, sub:sub || "", items:[] };
       report.blocks.push(b);
@@ -1595,7 +1627,7 @@
     var rows = chordVoices();
     function voicesAt(slot){ return (rows && rows[slot]) || voicesOf(slot); }
 
-    state.chords.forEach(function(degree, slot){
+    state.chords.slice(0, depth).forEach(function(degree, slot){
       var v = voicesAt(slot), tones = chordLetters(degree), counts = {};
       var add = block([slot], spell(degree));
       v.forEach(function(n){ counts[n.letter] = (counts[n.letter] || 0) + 1; });
@@ -1666,7 +1698,7 @@
     });
 
     /* what happens between one chord and the next */
-    for (var i = 0; i + 1 < state.chords.length; i++){
+    for (var i = 0; i + 1 < depth; i++){
       var a = voicesAt(i), b = voicesAt(i + 1);
       var add = block([i, " \u2192 ", i + 1]);
       if (a.length !== MAX_VOICES || b.length !== MAX_VOICES) continue;
@@ -1964,7 +1996,7 @@
       var n = drag.note, at = state.notes.indexOf(n);
       if (at < 0){ drag = null; render(); return; }   /* it was cleared from under us */
       var t = targetAt(p);
-      if (t.slot !== n.slot && slotFull(t.slot)) return;   /* that chord is full */
+      if (t.slot !== n.slot && (slotFull(t.slot) || locked(t.slot))) return;   /* not that chord */
       if ((t.slot !== n.slot || t.step !== n.step) && indexAt(t.slot, t.step) === -1){
         if (t.slot === n.slot) t.voice = n.voice;    /* moving within a chord keeps the voice */
         state.notes[at] = t;
@@ -2086,7 +2118,7 @@
     }
     var t = targetAt(p);
     lastClick = null;
-    if (indexAt(t.slot, t.step) === -1 && !slotFull(t.slot)){
+    if (indexAt(t.slot, t.step) === -1 && !slotFull(t.slot) && !locked(t.slot)){
       state.notes.push(t);
       startPop(t.slot, t.step, t.staff);
     }
@@ -2119,7 +2151,7 @@
         i = indexAt(cursor.slot, cursor.step);
         if (i > -1 && state.notes[i].given) break;      /* not yours to take off */
         if (i > -1) state.notes.splice(i, 1);
-        else if (!slotFull(cursor.slot)){
+        else if (!slotFull(cursor.slot) && !locked(cursor.slot)){
           state.notes.push({slot:cursor.slot, step:cursor.step, staff:cursor.staff});
           startPop(cursor.slot, cursor.step, cursor.staff);
         }
@@ -2318,6 +2350,7 @@
             "note. The figures follow whatever bass you write."
   };
   function enterStage(){
+    open = Math.max(1, Math.min(open, state.chords.length - 1));
     fitStaff();
     SLOT_X = layoutSlots();
     stopPlayback();
@@ -2343,6 +2376,7 @@
     state.tonic = key.tonic;
     state.chords = makeProgression();
     state.marks = {};
+    open = 1;
     state.drill = kind;
     var line = kind === "bass" ? makeBass(state.chords) : makeSoprano(state.chords);
     state.notes = line.map(function(step, slot){
@@ -2370,7 +2404,7 @@
   begin.addEventListener("click", function(){
     var sig = state.mode + "|" + state.tonic + "|" + state.chords.join(",");
     if (sig !== state.live){                    /* a changed setup starts clean */
-      state.notes = []; state.marks = {}; state.drill = null;
+      state.notes = []; state.marks = {}; state.drill = null; open = 1;
     }
     enterStage();
   });
