@@ -1833,6 +1833,23 @@
         }
       }
 
+      /* Overlap: a voice moving past where its neighbour has just been.
+         Crossing is two voices in the wrong order at one moment; overlap is
+         one voice stepping into the space the other has only that instant
+         left, which blurs the two lines the same way a beat later. Adjacent
+         voices only — that is the whole of it. */
+      for (var ov = 0; ov + 1 < MAX_VOICES; ov++){
+        var wasLow = a[ov], wasHigh = a[ov + 1], nowLow = b[ov], nowHigh = b[ov + 1];
+        if (nowHigh.midi < wasLow.midi)
+          add("error", VOICES[ov + 1] + " falls to " + nowHigh.name + ", under the " +
+              VOICES[ov] + "'s " + wasLow.name + " \u2014 the voices have overlapped.",
+              "overlapped");
+        else if (nowLow.midi > wasHigh.midi)
+          add("error", VOICES[ov] + " rises to " + nowLow.name + ", over the " +
+              VOICES[ov + 1] + "'s " + wasHigh.name + " \u2014 the voices have overlapped.",
+              "overlapped");
+      }
+
       /* the leading tone, whenever a dominant goes to the tonic */
       if (state.chords[i] === 5 && state.chords[i + 1] === 1){
         var lt = leadingLetter(), tonic = tonicLetter(), fifth = chordLetters(1)[2];
