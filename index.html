@@ -1349,7 +1349,7 @@
     renderChips();
     renderReport();
     var depth = writtenDepth(), all = depth === state.chords.length;
-    checkBtn.hidden = depth < 2;
+    checkBtn.hidden = depth < 1;
     checkBtn.textContent = all ? "Check voice leading" : "Proceed";
     /* Play stays up throughout, so a part-written progression can be heard;
        an empty chord simply passes in silence */
@@ -1364,7 +1364,7 @@
       all ? "Doubling, spacing, crossing, the leading tone and parallels."
       : slotCount(depth) === 0
         ? (depth === 0 ? "Write the opening chord in all four voices \u2014 it names them for the rest."
-           : depth === 1 ? "Write the second chord, and the two can be checked together."
+           : locked(depth) ? "Everything written so far. Nothing to fix and the next chord opens."
            : "Write the next chord, then check again.")
       : wants ? wants
       : "Everything written so far. Nothing to fix and the next chord opens.";
@@ -1376,7 +1376,7 @@
   playBtn.addEventListener("click", playProgression);
   checkBtn.addEventListener("click", function(){
     var depth = writtenDepth();
-    if (depth < 2) return;
+    if (depth < 1) return;
     report = runChecks(depth);
     if (!report.errors) openTo(depth);      /* nothing to fix — the next chord is yours */
     reportKey = notesKey();
@@ -1684,12 +1684,14 @@
   }
   /* Four-part writing is done a chord at a time, and a mistake in the second
      chord is worth knowing about before the fifth is written on top of it.
-     So the checklist runs on whatever is written so far, from the second
+     So the checklist runs on whatever is written so far, from the opening
      chord on, and the progression opens one chord at a time: the next is
      available once everything before it has come back with nothing to fix.
+     Even the first chord is checked on its own — its doubling, spacing and
+     crossing are worth knowing before a second chord is written against it.
      The frontier only ever moves forward — going back to revise an earlier
      chord clears the report, but it does not shut the door behind you. */
-  var open = 1;
+  var open = 0;
   function locked(slot){ return slot > open; }
   function openTo(depth){
     open = Math.max(open, Math.min(depth, state.chords.length - 1));
@@ -2460,7 +2462,7 @@
             "note. The figures follow whatever bass you write."
   };
   function enterStage(){
-    open = Math.max(1, Math.min(open, state.chords.length - 1));
+    open = Math.max(0, Math.min(open, state.chords.length - 1));
     fitStaff();
     SLOT_X = layoutSlots();
     stopPlayback();
@@ -2486,7 +2488,7 @@
     state.tonic = key.tonic;
     state.chords = makeProgression();
     state.marks = {};
-    open = 1;
+    open = 0;
     state.drill = kind;
     var line = kind === "bass" ? makeBass(state.chords) : makeSoprano(state.chords);
     state.notes = line.map(function(step, slot){
@@ -2514,7 +2516,7 @@
   begin.addEventListener("click", function(){
     var sig = state.mode + "|" + state.tonic + "|" + state.chords.join(",");
     if (sig !== state.live){                    /* a changed setup starts clean */
-      state.notes = []; state.marks = {}; state.drill = null; open = 1;
+      state.notes = []; state.marks = {}; state.drill = null; open = 0;
     }
     enterStage();
   });
