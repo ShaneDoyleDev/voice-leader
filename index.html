@@ -1193,6 +1193,7 @@
     }).join(",") + ")";
   }
   function noteColor(n){
+    if (!isChordTone(n)) return "var(--wrong)";      /* wrong outranks played */
     var base = n.given ? "--rule" : "--ink", t = tintOf(n.slot);
     return t <= 0 ? "var(" + base + ")"
          : t >= 1 ? "var(--accent)"
@@ -1237,6 +1238,10 @@
   var keyboard = false, lastClick = null;
 
   var MAX_VOICES = 4;                      /* one chord, four voices */
+  /* a placed note that is none of the chord's three tones draws in red */
+  function isChordTone(note){
+    return chordLetters(state.chords[note.slot]).indexOf(note.step % 7) > -1;
+  }
   function slotCount(slot){
     var n = 0;
     state.notes.forEach(function(x){ if (x.slot === slot) n++; });
@@ -1591,21 +1596,29 @@
     var fig = inversionOf(slot);
     if (fig) node.appendChild(figureNode(fig));
   }
-  /* How many chords from the start are written: each one its own tones,
-     nothing foreign, nothing missing, and the opening chord in four voices
-     whatever else it has, since it is the chord that names the voices the
-     rest are read against. */
+  /* A chord is written once its four voices are there, whether or not they
+     are the right notes — being wrong is what the checklist is for, and it
+     cannot say so if it will not run. Three notes count too, but only when
+     all of the chord's tones are present: that is the deliberate omission of
+     a fifth rather than an unfinished chord. The opening chord always needs
+     its four, being the chord that names the voices the rest are read
+     against. */
+  function filled(slot){
+    var n = slotCount(slot);
+    if (n === MAX_VOICES) return true;
+    return slot > 0 && n === 3 && chordIsClean(slot);
+  }
   function writtenDepth(){
-    if (!state.chords.length || slotCount(0) !== MAX_VOICES || !chordIsClean(0)) return 0;
+    if (!state.chords.length || !filled(0)) return 0;
     var k = 1;
-    while (k < state.chords.length && chordIsClean(k)) k++;
+    while (k < state.chords.length && filled(k)) k++;
     return k;
   }
   /* What the chord being written still wants, in as many words. Nothing on
      the staff is marked wrong any more, so a note outside the chord or a
      missing third would otherwise just leave the button quietly absent. */
   function wantsAt(slot){
-    if (slot == null || slot >= state.chords.length) return null;
+    if (slot == null || slot >= state.chords.length || filled(slot)) return null;
     var degree = state.chords[slot], tones = chordLetters(degree);
     var notes = notesIn(slot), seen = {}, stray = null, i, l;
     var name = slot === 0 ? "The opening chord" : "This chord";
@@ -1660,6 +1673,13 @@
       var v = voicesAt(slot), tones = chordLetters(degree), counts = {};
       var add = block([slot], spell(degree));
       v.forEach(function(n){ counts[n.letter] = (counts[n.letter] || 0) + 1; });
+
+      /* a note that is not in the chord at all */
+      v.forEach(function(n, idx){
+        if (tones.indexOf(n.letter) > -1) return;
+        add("error", VOICES[idx] + " is on " + n.name + ", which is not one of this chord's tones \u2014 " +
+            spell(degree) + ".", n.name);
+      });
 
       /* completeness — the fifth is the one tone that may be left out */
       tones.forEach(function(l, idx){
