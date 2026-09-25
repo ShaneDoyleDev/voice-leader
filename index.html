@@ -1216,7 +1216,8 @@
     if (acc) g.appendChild(glyph(acc, x - half - 3 - glyphW(acc, S), y, S, color));
     g.appendChild(glyph("noteheadBlack", x - half, y, S, color));
     /* the stem rises from the right of the head, or falls from its left */
-    var up = note.step < def.mid, sx = up ? x + half - 0.7 : x - half + 0.7;
+    var up = opts.stem ? opts.stem === "up" : note.step < def.mid;
+    var sx = up ? x + half - 0.7 : x - half + 0.7;
     g.appendChild(el("line",{x1:sx, y1:y, x2:sx, y2: up ? y - 42 : y + 42,
                              stroke:color, "stroke-width":1.4}));
     /* a finger covers the note it is placing, so while one is down the
@@ -1263,6 +1264,32 @@
       if (state.notes[i].slot === slot && state.notes[i].step === step) return i;
     return -1;
   }
+  /* A unison — two voices on one pitch — is a real thing to write, so a
+     position takes two notes. It is reached by moving a voice onto another's
+     pitch rather than by clicking the same spot twice, because a press on a
+     notehead already means take hold of it. */
+  var MAX_AT = 2;
+  function countAt(slot, step, except){
+    var n = 0, i;
+    for (i = 0; i < state.notes.length; i++)
+      if (state.notes[i].slot === slot && state.notes[i].step === step &&
+          state.notes[i] !== except) n++;
+    return n;
+  }
+  /* of two notes in one place, a press takes the one written last */
+  function topAt(slot, step){
+    for (var i = state.notes.length - 1; i >= 0; i--)
+      if (state.notes[i].slot === slot && state.notes[i].step === step) return i;
+    return -1;
+  }
+  /* and they are printed as one head with a stem each way, the way a chorale
+     prints a unison */
+  function stemFor(n){
+    var mates = state.notes.filter(function(m){
+      return m.slot === n.slot && m.step === n.step;
+    });
+    return mates.length < 2 ? null : (mates.indexOf(n) === 0 ? "down" : "up");
+  }
 
   function render(){
     [layerNotes, layerGhost, layerSlot].forEach(function(l){
@@ -1285,7 +1312,7 @@
       if (drag && drag.note === n) return;
       /* the chord that is sounding colours itself, so the ear and the eye
          are on the same chord */
-      layerNotes.appendChild(noteGroup(n,{ color: noteColor(n) }));
+      layerNotes.appendChild(noteGroup(n,{ color: noteColor(n), stem: stemFor(n) }));
     });
     if (drag)
       layerGhost.appendChild(noteGroup(drag.note,{color:"var(--accent)", pop:false,
@@ -1511,16 +1538,25 @@
   })();
 
   function pitchOf(n){ return midiAt(n.slot, n.step); }   /* works on a raw placed note */
+  /* Two voices on one pitch leave the assignment genuinely tied — either of
+     them can be the alto and the sound is the same. Rather than let the tie
+     fall where it may and have the names swap about between renders, a tie
+     keeps whatever the notes were called before. */
   function matchVoices(prev, notes){
-    var best = null, bestCost = Infinity, bestCross = Infinity;
+    var best = null, bestCost = Infinity, bestCross = Infinity, bestKept = -1;
     PERMS.forEach(function(perm){
-      var cost = 0, cross = 0, v, w;
-      for (v = 0; v < 4; v++) cost += Math.abs(pitchOf(notes[perm[v]]) - pitchOf(prev[v]));
+      var cost = 0, cross = 0, kept = 0, v, w;
+      for (v = 0; v < 4; v++){
+        cost += Math.abs(pitchOf(notes[perm[v]]) - pitchOf(prev[v]));
+        if (notes[perm[v]].voice === v) kept++;
+      }
       for (v = 0; v < 4; v++)
         for (w = v + 1; w < 4; w++)
           if (pitchOf(notes[perm[v]]) > pitchOf(notes[perm[w]])) cross++;
-      if (cost < bestCost || (cost === bestCost && cross < bestCross)){
-        bestCost = cost; bestCross = cross; best = perm;
+      if (cost < bestCost ||
+          (cost === bestCost && cross < bestCross) ||
+          (cost === bestCost && cross === bestCross && kept > bestKept)){
+        bestCost = cost; bestCross = cross; bestKept = kept; best = perm;
       }
     });
     return best.map(function(idx){ return notes[idx]; });
@@ -1727,6 +1763,19 @@
       if (v.length < MAX_VOICES && v.length >= 3)
         add("ok", v.length + " voices \u2014 spacing, crossing and the parallel checks want a fourth.");
 
+      /* two voices on one pitch: allowed, and worth saying. Any pair, not
+         just neighbours — voices that have crossed can meet too. */
+      if (v.length === MAX_VOICES){
+        for (var u = 0; u < MAX_VOICES; u++){
+          for (var u2 = u + 1; u2 < MAX_VOICES; u2++){
+            if (v[u].midi !== v[u2].midi) continue;
+            add("caution", VOICES[u] + " and " + VOICES[u2] + " are in unison on " +
+                v[u].name + " \u2014 fine to write, but the texture is three parts while it lasts.",
+                "unison");
+          }
+        }
+      }
+
       /* a lower voice sounding above the one named over it */
       if (v.length === MAX_VOICES){
         for (var lower = 0; lower + 1 < MAX_VOICES; lower++){
@@ -1763,14 +1812,21 @@
          hidden fifths and octaves. */
       for (var lo = 0; lo < 4; lo++){
         for (var hi = lo + 1; hi < 4; hi++){
-          var before = (a[hi].midi - a[lo].midi) % 12, after = (b[hi].midi - b[lo].midi) % 12;
+          var gapA = a[hi].midi - a[lo].midi, gapB = b[hi].midi - b[lo].midi;
+          var before = gapA % 12, after = gapB % 12;
           if (before !== after || (before !== 0 && before !== 7)) continue;
           var dLo = Math.sign(b[lo].midi - a[lo].midi), dHi = Math.sign(b[hi].midi - a[hi].midi);
           if (dLo === 0 || dLo !== dHi) continue;
-          add("error", "Parallel " + (before === 7 ? "fifths" : "octaves") + ": " +
+          /* a unison is not an octave, and saying so is the difference
+             between a rule a student recognises and one they do not */
+          var kind = before === 7 ? "fifths"
+                   : (gapA === 0 && gapB === 0) ? "unisons"
+                   : (gapA === 0 || gapB === 0) ? "octaves, one of them a unison"
+                   : "octaves";
+          add("error", "Parallel " + kind + ": " +
               VOICES[lo] + " and " + VOICES[hi] + " move " + a[lo].name + "\u2013" + a[hi].name +
               " to " + b[lo].name + "\u2013" + b[hi].name + ".",
-              "Parallel " + (before === 7 ? "fifths" : "octaves"));
+              "Parallel " + kind);
           report.parallels.push({ move:i, lo:lo, hi:hi });
         }
       }
@@ -2025,7 +2081,7 @@
   }
   function hitNote(p){
     var t = targetAt(p);
-    return indexAt(t.slot, t.step);
+    return topAt(t.slot, t.step);
   }
   /* a given note answers to nothing: it cannot be grabbed, dragged or
      double-clicked away, and a click on it places nothing either */
@@ -2051,7 +2107,7 @@
       if (at < 0){ drag = null; render(); return; }   /* it was cleared from under us */
       var t = targetAt(p);
       if (t.slot !== n.slot && (slotFull(t.slot) || locked(t.slot))) return;   /* not that chord */
-      if ((t.slot !== n.slot || t.step !== n.step) && indexAt(t.slot, t.step) === -1){
+      if ((t.slot !== n.slot || t.step !== n.step) && countAt(t.slot, t.step, n) < MAX_AT){
         if (t.slot === n.slot) t.voice = n.voice;    /* moving within a chord keeps the voice */
         state.notes[at] = t;
         drag.note = t;
