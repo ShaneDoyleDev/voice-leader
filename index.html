@@ -522,7 +522,10 @@
   }
 
   /* ---------- key and chords --------------------------------------------- */
-  var state = { mode:"major", tonic:"C", chords:[1,4,5,1], notes:[], live:"", drill:null };
+  /* marks[slot + ":" + tone] is how many times you have ticked that tone of
+     that chord off above the staff: one for used, two for doubled. They are
+     yours, not the app's — nothing here counts your notes for you. */
+  var state = { mode:"major", tonic:"C", chords:[1,4,5,1], notes:[], marks:{}, live:"", drill:null };
 
   function keyAcc(){
     var list = KEYS[state.mode], i;
@@ -789,6 +792,33 @@
     svg.style.height = Math.round(VIEW_H * unitPx) + "px";
   }
 
+  /* The chord's three tones are listed above its column and ticked off by
+     hand: one press marks a tone as used, a second doubles it and sets a dot
+     over the letter, a third clears it. The band sits above the top ledger
+     line C6 can reach, so nothing on the staff is underneath it. */
+  /* the band stops just short of 36, which is where C6 itself is written —
+     the top ledger line stays clickable */
+  var MARK_Y = 26, MARK_DOT_Y = 11, MARK_BAND = 33;
+  function markSpread(){
+    var gap = SLOT_X.length > 1 ? SLOT_X[1] - SLOT_X[0] : 108;
+    return Math.max(15, Math.min(25, (gap - 10) / 3));
+  }
+  function markX(slot, j){ return SLOT_X[slot] + (j - 1) * markSpread(); }
+  function markOf(slot, j){ return state.marks[slot + ":" + j] || 0; }
+  function markBump(slot, j){
+    state.marks[slot + ":" + j] = (markOf(slot, j) + 1) % 3;
+  }
+  /* a press in the band belongs to the band, whether or not it found a
+     letter — underneath it there is nothing but the top of the canvas */
+  function markHit(p){
+    if (p.y > MARK_BAND) return null;
+    var slot = slotAt(p.x), half = markSpread() / 2 + 3, j;
+    if (SLOT_X[slot] == null) return { slot:slot, idx:-1 };
+    for (j = 0; j < 3; j++)
+      if (Math.abs(p.x - markX(slot, j)) <= half) return { slot:slot, idx:j };
+    return { slot:slot, idx:-1 };
+  }
+
   function slotAt(x){
     var best = 0, bd = Infinity, i, d;
     for (i = 0; i < SLOT_X.length; i++){
@@ -915,14 +945,12 @@
 
   }
 
-  /* Roman numeral and spelling under each chord. A chord tone lights up once
-     it is on the staff, in any octave, so the spelling reads as a tally of
-     what the chord still needs: the numeral joins in when all three tones
-     are there, and a dot under a tone means it has been doubled. */
+  /* The Roman numeral, with its figure, under each chord; the chord's tones
+     above it, over the staff, where they are ticked off by hand. */
   function drawLabels(){
     while (layerLabels.firstChild) layerLabels.removeChild(layerLabels.firstChild);
     state.chords.forEach(function(degree, i){
-      var tones = chordLetters(degree), count = {}, k;
+      var tones = chordLetters(degree), count = {};
       state.notes.forEach(function(n){
         if (n.slot === i) count[n.step % 7] = (count[n.step % 7] || 0) + 1;
       });
@@ -947,25 +975,21 @@
       }
       layerLabels.appendChild(t);
 
-      var row = el("text",{x:SLOT_X[i], y:244, "text-anchor":"middle",
-                           "font-family":"IBM Plex Sans, sans-serif", "font-size":10.5});
-      var spans = tones.map(function(l, j){
-        var sp = el("tspan",{ fill:"var(--ink-soft)", dx: j ? 3 : 0 });
-        sp.textContent = letterText(degree, l);
-        row.appendChild(sp);
-        return sp;
+      tones.forEach(function(l, j){
+        var on = markOf(i, j), x = markX(i, j);
+        var sp = el("text",{x:x, y:MARK_Y, "text-anchor":"middle",
+                            "font-family":"IBM Plex Sans, sans-serif", "font-size":11.5,
+                            "font-weight": on ? 600 : 400,
+                            fill: on ? "var(--accent)" : "var(--ink-soft)"});
+        var hint = el("title",{});
+        hint.textContent = on === 2 ? "Doubled \u2014 press to clear"
+                         : on ? "Used \u2014 press again to double" : "Press to mark as used";
+        sp.appendChild(hint);
+        sp.appendChild(document.createTextNode(letterText(degree, l)));
+        layerLabels.appendChild(sp);
+        if (on === 2)
+          layerLabels.appendChild(el("circle",{cx:x, cy:MARK_DOT_Y, r:2, fill:"var(--accent)"}));
       });
-      layerLabels.appendChild(row);
-
-      /* dots go on after the row is in the document, where a tspan can be measured */
-      for (k = 0; k < tones.length; k++){
-        if (!(count[tones[k]] > 1)) continue;
-        try {
-          var b = spans[k].getBBox();
-          layerLabels.appendChild(el("circle",{cx:b.x + b.width / 2, cy:250, r:1.7,
-                                               fill:"var(--accent)"}));
-        } catch (e) { /* no layout yet — the dot reappears on the next render */ }
-      }
     });
   }
 
@@ -1925,7 +1949,9 @@
   }
 
   function setCursor(p){
+    var m = markHit(p);
     svg.style.cursor = drag ? "grabbing"
+      : m ? (m.idx > -1 ? "pointer" : "default")
       : hitNote(p) > -1 ? (hitFree(p) > -1 ? "grab" : "default")   /* a note answers first */
       : cueHit(p) != null ? "pointer" : "crosshair";
   }
@@ -2000,7 +2026,11 @@
       }
     }
     setCursor(p);
-    if (touching){ hover = targetAt(p); hoverNear = Math.abs(p.x - SLOT_X[hover.slot]) <= 30; }
+    /* no ghost under a finger that is aiming at the tone row or the cross */
+    if (touching && !markHit(local(e)) && cueHit(local(e)) == null){
+      hover = targetAt(p);
+      hoverNear = Math.abs(p.x - SLOT_X[hover.slot]) <= 30;
+    }
     render();
   });
   svg.addEventListener("pointercancel", function(){
@@ -2019,7 +2049,15 @@
     press = null;
     touching = false;
     if (from.done){ hover = null; hoverNear = false; render(); return; }   /* held, and removed */
-    var cue = cueHit(local(e));          /* the cross answers to the finger itself */
+    /* the tone row and the cross answer to the finger itself, not to the
+       point above it that a finger is aiming the note at */
+    var mark = markHit(local(e));
+    if (mark && !drag){
+      if (mark.idx > -1) markBump(mark.slot, mark.idx);
+      hover = null; hoverNear = false; lastClick = null;
+      setCursor(p); render(); return;
+    }
+    var cue = cueHit(local(e));
     if (cue != null && !drag){
       hover = null; lastClick = null;
       clearNotes(cue);                 /* the same drift as Clear notes */
@@ -2304,6 +2342,7 @@
     state.mode = key.mode;
     state.tonic = key.tonic;
     state.chords = makeProgression();
+    state.marks = {};
     state.drill = kind;
     var line = kind === "bass" ? makeBass(state.chords) : makeSoprano(state.chords);
     state.notes = line.map(function(step, slot){
@@ -2330,7 +2369,9 @@
 
   begin.addEventListener("click", function(){
     var sig = state.mode + "|" + state.tonic + "|" + state.chords.join(",");
-    if (sig !== state.live){ state.notes = []; state.drill = null; }   /* a changed setup starts clean */
+    if (sig !== state.live){                    /* a changed setup starts clean */
+      state.notes = []; state.marks = {}; state.drill = null;
+    }
     enterStage();
   });
   document.getElementById("edit").addEventListener("click", function(){
