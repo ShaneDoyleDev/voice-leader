@@ -446,6 +446,8 @@
       <textarea id="exporttext" readonly hidden aria-label="The exercise as text"></textarea>
       <div class="checkbar">
         <button type="button" id="check" hidden>Check voice leading</button>
+        <button type="button" id="showme" class="ghost" hidden
+                title="Write a correct voicing for the chord you are on, in place of what is there">Show me one</button>
         <p id="checkhint"></p>
       </div>
     </div>
@@ -1502,6 +1504,8 @@
     renderReport();
     var depth = writtenDepth(), all = depth === state.chords.length;
     checkBtn.hidden = depth < 1;
+    /* asking for an answer makes sense until the whole thing is right */
+    showBtn.hidden = all && report && !report.errors && report.depth === depth;
     checkBtn.textContent = all ? "Check voice leading" : "Proceed";
     /* Play stays up throughout, so a part-written progression can be heard;
        an empty chord simply passes in silence */
@@ -1524,6 +1528,7 @@
 
   var chips = document.getElementById("chips");
   var checkBtn = document.getElementById("check"), checkHint = document.getElementById("checkhint");
+  var showBtn = document.getElementById("showme");
   var playBtn = document.getElementById("play");
   playBtn.addEventListener("click", playProgression);
   checkBtn.addEventListener("click", function(){
@@ -2761,6 +2766,132 @@
     stage.hidden = true;
     setup.hidden = false;
     drawSetup();
+  });
+
+  /* ---------- show me one -------------------------------------------------
+     The checker knows every rule; turned round, it can answer as well as
+     mark. The search is small enough to be exhaustive — the bass takes the
+     root, the voices above it any tone of the chord within reach of each
+     other — and every candidate is put on the staff and run past runChecks
+     before it is offered. So an answer is right by the same reckoning that
+     marks you, rather than by a second opinion that might disagree with it,
+     and the smoothest of the right ones is the one you get. */
+  function tonePitches(slot, lo, hi){
+    var tones = chordLetters(state.chords[slot]), out = [], step;
+    for (step = Math.max(16, lo); step <= Math.min(42, hi); step++)
+      if (tones.indexOf(step % 7) > -1) out.push(step);
+    return out;
+  }
+  /* the chord the answer is wanted for: the first that is unwritten, or
+     written and not yet right */
+  function firstWanting(){
+    var k, rep;
+    for (k = 0; k < state.chords.length; k++){
+      if (!filled(k)) return k;
+      updateVoices();
+      rep = runChecks(k + 1);
+      if (rep.errors) return k;
+    }
+    return null;
+  }
+  /* The cost that orders the candidates is what makes an answer worth
+     looking at rather than merely legal: the smallest move from the chord
+     before, a whole chord over one that has dropped its fifth, the upper
+     three voices kept near each other, and unisons treated as the unusual
+     thing they are. With no chord behind it, a comfortable soprano stands
+     in for smoothness. */
+  var SOLVE_HOME = [20, 25, 29, 33];              /* B♭2, G3, D4, A4 — the middle of each voice */
+  function costOf(slot, c, prev, tones){
+    var cost = 0, i;
+    for (i = 0; i < 4 && i < prev.length; i++)
+      cost += Math.abs(midiAt(slot, c[i]) - midiAt(slot - 1, prev[i].step));
+    tones.forEach(function(l){
+      if (!c.some(function(step){ return step % 7 === l; })) cost += 5;
+    });
+    cost += Math.abs(c[2] - c[1] - 3) + Math.abs(c[3] - c[2] - 3);
+    cost += Math.max(0, (c[1] - c[0]) - 7) * 0.8;   /* the tenor is not a second bass */
+    if (new Set(c).size < 4) cost += 6;
+    /* and each voice near where that voice usually sits. This is a leaning
+       in the search rather than a rule in the checklist — nothing here marks
+       a voice for its register — but an answer with the bass on middle C is
+       not one worth showing anybody. */
+    for (i = 0; i < 4; i++) cost += Math.abs(c[i] - SOLVE_HOME[i]) * 0.35;
+    return cost;
+  }
+  /* An answer that leaves the next chord nowhere to go is a poor answer, so
+     the smoothest few are asked whether anything can follow them. Looking
+     further ahead than one chord costs more than it is worth, and where
+     nothing can follow any of them the smoothest is given anyway — the wall
+     is then real, and worth meeting. */
+  var SOLVE_LOOKAHEAD = 8, SOLVE_TRIES = 400;
+  function solveChord(slot, quick){
+    var root = chordLetters(state.chords[slot])[0], tones = chordLetters(state.chords[slot]);
+    var given = state.notes.filter(function(n){ return n.slot === slot && n.given; });
+    var kept = state.notes.filter(function(n){ return n.slot !== slot; });
+    var prev = slot > 0 ? notesIn(slot - 1) : [];
+    var was = state.notes, cands = [], answer = null, fallback = null, clean = 0, i;
+    tonePitches(slot, 16, 28).forEach(function(b){
+      if (b % 7 !== root) return;                       /* root position only */
+      /* voices may meet: a complete seventh chord resolving to its tonic can
+         leave a voice nowhere to go but onto its neighbour's note, and a
+         search that wanted four distinct pitches would call that no answer */
+      tonePitches(slot, b, 33).forEach(function(t){
+        tonePitches(slot, t, t + 7).forEach(function(a){        /* within an octave */
+          tonePitches(slot, a, a + 7).forEach(function(sop){
+            if (new Set([b, t, a, sop]).size < 3) return;       /* no note three times over */
+            cands.push([b, t, a, sop]);
+          });
+        });
+      });
+    });
+    cands.forEach(function(c){ c.cost = costOf(slot, c, prev, tones); });
+    cands.sort(function(x, y){ return x.cost - y.cost; });
+    for (i = 0; i < cands.length && i < SOLVE_TRIES; i++){
+      var c = cands[i];
+      if (given.length && !given.every(function(n){ return c.indexOf(n.step) > -1; })) continue;
+      var trial = c.map(function(step){
+        var mine = given.filter(function(n){ return n.step === step; })[0];
+        return mine || { slot:slot, step:step, staff: step >= 28 ? "treble" : "bass" };
+      });
+      state.notes = kept.concat(trial);
+      updateVoices();
+      if (runChecks(slot + 1).errors) continue;
+      clean++;
+      if (!quick && clean <= SOLVE_LOOKAHEAD && slot + 1 < state.chords.length &&
+          !solveChord(slot + 1, true)){
+        fallback = fallback || trial;       /* legal, but nothing can follow it */
+        continue;
+      }
+      answer = trial;
+      break;
+    }
+    state.notes = was;
+    updateVoices();
+    return answer || fallback;
+  }
+  function flashShow(word){
+    var b = document.getElementById("showme");
+    b.textContent = word;
+    setTimeout(function(){ b.textContent = "Show me one"; }, 1800);
+  }
+  document.getElementById("showme").addEventListener("click", function(){
+    var slot = firstWanting();
+    if (slot == null) return;
+    var answer = solveChord(slot);
+    if (!answer){ flashShow("Nothing fits"); render(); return; }
+    var going = state.notes.filter(function(n){ return n.slot === slot && !n.given; });
+    state.notes = state.notes.filter(function(n){ return going.indexOf(n) === -1; })
+                             .concat(answer.filter(function(n){ return !n.given; }));
+    driftAway(going);
+    /* and then it is checked, like anything else written here */
+    var depth = writtenDepth();
+    if (depth >= 1){
+      report = runChecks(depth);
+      if (!report.errors) openTo(depth);
+      reportKey = notesKey();
+      flowAt = performance.now() - (reducedMotion() ? 1e6 : 0);
+    }
+    render();
   });
 
   /* ---------- the exercise as text ----------------------------------------
