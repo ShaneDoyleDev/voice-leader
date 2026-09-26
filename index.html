@@ -866,24 +866,28 @@
      leaves a real gutter before the next chord begins, which means measuring
      from the outside of the outer letters rather than from their centres.
      Where even that is tight the letters take a smaller size. */
-  var MARK_GUTTER = 20;
-  function markSize(slot){
-    var gap = SLOT_X.length > 1 ? SLOT_X[1] - SLOT_X[0] : 108;
-    return gap / Math.max(1, markCount(slot)) < 24 ? 11 : 13.5;
-  }
-  /* half an outer letter, plus the ground's own margin: the chip hugs the
-     letters so the width it costs is the letters and not much else */
-  function markPad(slot){ return markSize(slot) * 0.5 + 7; }
+  var MARK_GUTTER = 20, MARK_BIG = 13.5, MARK_SMALL = 11;
+  /* How wide a tone row is cannot be reckoned from the font: E♭ is half
+     again as wide as G, and four of those want a size the same four bare
+     letters would not. So drawLabels measures what it has drawn and sets the
+     row from that, leaving what it worked out here for the hit-testing to
+     read. Before the first draw these are estimates, and only the first
+     frame ever uses them. */
+  var markLayout = [];
+  function markGap(){ return SLOT_X.length > 1 ? SLOT_X[1] - SLOT_X[0] : 108; }
   function markSpread(slot){
-    var gap = SLOT_X.length > 1 ? SLOT_X[1] - SLOT_X[0] : 108;
-    var room = gap - MARK_GUTTER - markPad(slot);
-    return Math.max(markSize(slot) + 1.5,
-                    Math.min(26, room / Math.max(1, markCount(slot) - 1)));
+    if (markLayout[slot]) return markLayout[slot].spread;
+    return Math.max(15, Math.min(26, (markGap() - MARK_GUTTER - 20) /
+                                     Math.max(1, markCount(slot) - 1)));
   }
-  function markWidth(slot){
-    return markSpread(slot) * (markCount(slot) - 1) + markPad(slot);
+  /* the spread that fits n letters of this width in the room there is */
+  function markFit(n, wide){
+    var room = markGap() - MARK_GUTTER - wide - 12;
+    return Math.max(wide + 2, Math.min(26, room / Math.max(1, n - 1)));
   }
   function markX(slot, j){
+    var m = markLayout[slot];
+    if (m && m.xs[j] != null) return m.xs[j];
     return SLOT_X[slot] + (j - (markCount(slot) - 1) / 2) * markSpread(slot);
   }
   function markOf(slot, j){ return state.marks[slot + ":" + j] || 0; }
@@ -896,7 +900,7 @@
     if (p.y > MARK_BAND) return null;
     var slot = slotAt(p.x), j;
     if (SLOT_X[slot] == null) return { slot:slot, idx:-1 };
-    var half = markSpread(slot) / 2 + 3;
+    var half = markSpread(slot) / 2 + 2;
     for (j = 0; j < markCount(slot); j++)
       if (Math.abs(p.x - markX(slot, j)) <= half) return { slot:slot, idx:j };
     return { slot:slot, idx:-1 };
@@ -1032,6 +1036,7 @@
      above it, over the staff, where they are ticked off by hand. */
   function drawLabels(){
     while (layerLabels.firstChild) layerLabels.removeChild(layerLabels.firstChild);
+    var rows = [];
     state.chords.forEach(function(degree, i){
       var tones = chordLetters(degree), count = {};
       state.notes.forEach(function(n){
@@ -1064,13 +1069,13 @@
 
       /* a ground of its own under each chord's tones, so a row of them reads
          as one group to a chord rather than a line of letters */
-      var wide = markWidth(i);
-      layerLabels.appendChild(el("rect",{x:SLOT_X[i] - wide / 2, y:2, width:wide, height:31,
-                                         rx:3, fill:"var(--chip)", opacity:dim}));
+      var ground = el("rect",{y:2, height:31, rx:3, fill:"var(--chip)", opacity:dim});
+      layerLabels.appendChild(ground);
+      var letters = [], dots = [], size = MARK_BIG;
       tones.forEach(function(l, j){
-        var on = markOf(i, j), x = markX(i, j);
-        var sp = el("text",{x:x, y:MARK_Y, "text-anchor":"middle",
-                            "font-family":"IBM Plex Sans, sans-serif", "font-size":markSize(i),
+        var on = markOf(i, j);
+        var sp = el("text",{x:markX(i, j), y:MARK_Y, "text-anchor":"middle",
+                            "font-family":"IBM Plex Sans, sans-serif", "font-size":size,
                             "font-weight": on ? 600 : 400, opacity:dim,
                             fill: on ? "var(--accent)" : "var(--ink-soft)"});
         var hint = el("title",{});
@@ -1079,11 +1084,68 @@
         sp.appendChild(hint);
         sp.appendChild(document.createTextNode(letterText(degree, l)));
         layerLabels.appendChild(sp);
-        if (on === 2)
-          layerLabels.appendChild(el("circle",{cx:x, cy:MARK_DOT_Y, r:2.2,
-                                               fill:"var(--accent)", opacity:dim}));
+        letters.push(sp);
+        dots.push(on === 2
+          ? layerLabels.appendChild(el("circle",{cy:MARK_DOT_Y, r:2.2,
+                                                 fill:"var(--accent)", opacity:dim}))
+          : null);
       });
+      rows.push({ slot:i, letters:letters, dots:dots, ground:ground });
     });
+    setRows(rows);
+  }
+
+  /* Measure the row that was just drawn and set it: the letters spaced so
+     that none of them touches its neighbour and the group still leaves a
+     gutter before the next chord, dropping a size where four letters
+     carrying accidentals cannot have both. Then the ground is drawn around
+     where they actually ended up, so nothing hangs over its edge. */
+  function widestOf(letters){
+    var w = 0;
+    letters.forEach(function(sp){ w = Math.max(w, sp.getBBox().width); });
+    return w;
+  }
+  /* One size for the whole row, and it is the largest that every chord in
+     it can take: a progression where the triads printed larger than the
+     seventh chords beside them would look like an accident rather than a
+     decision. So the rows are laid out at the larger letter, and if any one
+     of them cannot hold its letters apart and still leave a gutter, they all
+     drop together. */
+  function setRows(rows){
+    var size = MARK_BIG, tight = false;
+    try {
+      rows.forEach(function(row){
+        var wide = widestOf(row.letters), n = row.letters.length;
+        if (markFit(n, wide) * (n - 1) + wide + 12 > markGap() - MARK_GUTTER) tight = true;
+      });
+      if (tight){
+        size = MARK_SMALL;
+        rows.forEach(function(row){
+          row.letters.forEach(function(sp){ sp.setAttribute("font-size", size); });
+        });
+      }
+      rows.forEach(function(row){ setRow(row, size); });
+    } catch (e) { /* no layout yet — the next render measures it */ }
+  }
+  function setRow(row, size){
+    var letters = row.letters, n = letters.length, xs = [], j;
+    var wide = widestOf(letters), spread = markFit(n, wide);
+    for (j = 0; j < n; j++){
+      xs.push(SLOT_X[row.slot] + (j - (n - 1) / 2) * spread);
+      letters[j].setAttribute("x", xs[j]);
+      if (row.dots[j]) row.dots[j].setAttribute("cx", xs[j]);
+    }
+    var lo = Infinity, hi = -Infinity;
+    letters.forEach(function(sp){
+      var box = sp.getBBox();
+      lo = Math.min(lo, box.x);
+      hi = Math.max(hi, box.x + box.width);
+    });
+    if (isFinite(lo) && hi > lo){
+      row.ground.setAttribute("x", lo - 6);
+      row.ground.setAttribute("width", (hi - lo) + 12);
+    }
+    markLayout[row.slot] = { size:size, spread:spread, xs:xs };
   }
 
   /* A note pops in when it is placed: it lands a little small and eases up to
