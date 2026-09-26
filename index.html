@@ -1104,6 +1104,47 @@
       rows.push({ slot:i, letters:letters, dots:dots, ground:ground });
     });
     setRows(rows);
+    nameTheVoices();
+  }
+
+  /* When the checklist says two voices have crossed, or overlapped, or met
+     on one note, it is talking about which line each note belongs to — and
+     the staff does not otherwise say. So for as long as that report stands,
+     the notes it is about wear their voice's letter. It is the one thing the
+     eye cannot work out for itself: voices are lines, not pitch order, and
+     the whole complaint is that the two have come apart. */
+  function nameTheVoices(){
+    if (!report || drag) return;
+    var rows = chordVoices();
+    if (!rows) return;
+    var wanted = {};                         /* slot -> voice -> true */
+    report.blocks.forEach(function(b){
+      b.items.forEach(function(item){
+        var h = item.hear;
+        if (!h || !h.name) return;
+        var slots = h.chord != null ? [h.chord] : [h.move, h.move + 1];
+        slots.forEach(function(slot){
+          h.voices.forEach(function(v){
+            (wanted[slot] = wanted[slot] || {})[v] = true;
+          });
+        });
+      });
+    });
+    Object.keys(wanted).forEach(function(slot){
+      var row = rows[slot];
+      if (!row) return;
+      Object.keys(wanted[slot]).forEach(function(v){
+        var n = row[v], t = el("text",{
+          x:SLOT_X[slot] - 13, y:yOf(n.step, n.staff) + 3.5, "text-anchor":"end",
+          "font-family":"IBM Plex Sans, sans-serif", "font-size":10, "font-weight":600,
+          "letter-spacing":"0.06em", fill:"var(--wrong)"});
+        var title = el("title",{});
+        title.textContent = VOICES[v];
+        t.appendChild(title);
+        t.appendChild(document.createTextNode(VOICE_SHORT[v]));
+        layerLabels.appendChild(t);
+      });
+    });
   }
 
   /* Measure the row that was just drawn and set it: the letters spaced so
@@ -1978,7 +2019,7 @@
             if (v[u].midi !== v[u2].midi) continue;
             add("caution", VOICES[u] + " and " + VOICES[u2] + " are in unison on " +
                 v[u].name + " \u2014 fine to write, but the texture is three parts while it lasts.",
-                "unison", { chord:slot, voices:[u, u2] });
+                "unison", { chord:slot, voices:[u, u2], name:true });
           }
         }
       }
@@ -1989,7 +2030,7 @@
           if (v[lower].midi > v[lower + 1].midi)
             add("error", VOICES[lower] + " is above the " + VOICES[lower + 1] + " (" +
                 v[lower].name + " over " + v[lower + 1].name + ") \u2014 the voices have crossed.",
-                null, { chord:slot, voices:[lower, lower + 1] });
+                null, { chord:slot, voices:[lower, lower + 1], name:true });
         }
       }
 
@@ -2049,11 +2090,11 @@
         if (nowHigh.midi < wasLow.midi)
           add("error", VOICES[ov + 1] + " falls to " + nowHigh.name + ", under the " +
               VOICES[ov] + "'s " + wasLow.name + " \u2014 the voices have overlapped.",
-              "overlapped", { move:i, voices:[ov, ov + 1] });
+              "overlapped", { move:i, voices:[ov, ov + 1], name:true });
         else if (nowLow.midi > wasHigh.midi)
           add("error", VOICES[ov] + " rises to " + nowLow.name + ", over the " +
               VOICES[ov + 1] + "'s " + wasHigh.name + " \u2014 the voices have overlapped.",
-              "overlapped", { move:i, voices:[ov, ov + 1] });
+              "overlapped", { move:i, voices:[ov, ov + 1], name:true });
       }
 
       /* The seventh falls by step. It is the whole reason the chord is
