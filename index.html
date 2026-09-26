@@ -245,6 +245,15 @@
     padding:9px 12px; border-radius:3px;
   }
   .findings > li:nth-child(even){background:var(--chip)}   /* banded, for the eye */
+  .block li.hearable{padding-left:46px}   /* room for the button beside the dot */
+  .findings button.hear{                 /* sounds the notes the finding is about */
+    position:absolute; left:16px; top:-1px;
+    width:22px; height:22px; padding:0; margin:0;
+    border:1px solid var(--line); border-radius:50%; background:transparent;
+    color:var(--ink-soft); font-size:9px; line-height:1; cursor:pointer;
+  }
+  .findings button.hear:hover{border-color:var(--accent); color:var(--accent)}
+  .findings button.hear:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   .block > b{
     font-family:"Spectral",Georgia,serif; font-size:17px;
     color:var(--ink); letter-spacing:.04em; white-space:nowrap;
@@ -1879,8 +1888,11 @@
     function block(label, sub){
       var b = { label:label, sub:sub || "", items:[] };
       report.blocks.push(b);
-      return function(level, text, strong){
-        b.items.push({ level:level, text:text, strong:strong });
+      /* hear: which notes the finding is about, so it can be played. Either
+         { chord:slot, voices:[...] } for something inside one chord, or
+         { move:i, voices:[...] } for something between two. */
+      return function(level, text, strong, hear){
+        b.items.push({ level:level, text:text, strong:strong, hear:hear });
         if (level === "error") report.errors++;
         else if (level === "caution") report.cautions++;
       };
@@ -1966,7 +1978,7 @@
             if (v[u].midi !== v[u2].midi) continue;
             add("caution", VOICES[u] + " and " + VOICES[u2] + " are in unison on " +
                 v[u].name + " \u2014 fine to write, but the texture is three parts while it lasts.",
-                "unison");
+                "unison", { chord:slot, voices:[u, u2] });
           }
         }
       }
@@ -1976,7 +1988,8 @@
         for (var lower = 0; lower + 1 < MAX_VOICES; lower++){
           if (v[lower].midi > v[lower + 1].midi)
             add("error", VOICES[lower] + " is above the " + VOICES[lower + 1] + " (" +
-                v[lower].name + " over " + v[lower + 1].name + ") \u2014 the voices have crossed.");
+                v[lower].name + " over " + v[lower + 1].name + ") \u2014 the voices have crossed.",
+                null, { chord:slot, voices:[lower, lower + 1] });
         }
       }
 
@@ -1990,7 +2003,7 @@
               (named ? withArticle(named) : gap + " semitones") + " apart \u2014 " +
               lo.name + " to " + hi.name + ", " + gap +
               " semitones \u2014 keep adjacent upper voices within an octave.",
-              named || (gap + " semitones"));
+              named || (gap + " semitones"), { chord:slot, voices:[pair[1], pair[0]] });
         });
       }
     });
@@ -2021,7 +2034,7 @@
           add("error", "Parallel " + kind + ": " +
               VOICES[lo] + " and " + VOICES[hi] + " move " + a[lo].name + "\u2013" + a[hi].name +
               " to " + b[lo].name + "\u2013" + b[hi].name + ".",
-              "Parallel " + kind);
+              "Parallel " + kind, { move:i, voices:[lo, hi] });
           report.parallels.push({ move:i, lo:lo, hi:hi });
         }
       }
@@ -2036,11 +2049,11 @@
         if (nowHigh.midi < wasLow.midi)
           add("error", VOICES[ov + 1] + " falls to " + nowHigh.name + ", under the " +
               VOICES[ov] + "'s " + wasLow.name + " \u2014 the voices have overlapped.",
-              "overlapped");
+              "overlapped", { move:i, voices:[ov, ov + 1] });
         else if (nowLow.midi > wasHigh.midi)
           add("error", VOICES[ov] + " rises to " + nowLow.name + ", over the " +
               VOICES[ov + 1] + "'s " + wasHigh.name + " \u2014 the voices have overlapped.",
-              "overlapped");
+              "overlapped", { move:i, voices:[ov, ov + 1] });
       }
 
       /* The seventh falls by step. It is the whole reason the chord is
@@ -2056,10 +2069,12 @@
           if (to.step === n.step - 1) return;                   /* fell a step: the whole rule */
           if (to.midi === n.midi)
             add("caution", VOICES[idx] + " holds the seventh, " + n.name +
-                " \u2014 it is still owed its step down.", "holds the seventh");
+                " \u2014 it is still owed its step down.", "holds the seventh",
+                { move:i, voices:[idx] });
           else
             add("error", VOICES[idx] + " has the seventh, " + n.name +
-                ", which has to fall by step; it goes to " + to.name + ".", "fall by step");
+                ", which has to fall by step; it goes to " + to.name + ".", "fall by step",
+                { move:i, voices:[idx] });
         });
       }
 
@@ -2077,16 +2092,19 @@
         var risers = carriers.filter(rises);
         if (carriers.length === 1 && !risers.length){
           add("error", "The leading tone (" + a[carriers[0]].name + ", " + VOICES[carriers[0]] +
-              ") has to rise to the tonic; it goes to " + b[carriers[0]].name + ".");
+              ") has to rise to the tonic; it goes to " + b[carriers[0]].name + ".",
+              null, { move:i, voices:[carriers[0]] });
         } else if (carriers.length > 1){
           if (!risers.length){
-            add("error", "The leading tone is doubled and neither copy rises to the tonic \u2014 one of them must.");
+            add("error", "The leading tone is doubled and neither copy rises to the tonic \u2014 one of them must.",
+                null, { move:i, voices:carriers.slice() });
           } else {
             carriers.forEach(function(idx){
               if (rises(idx) || dropsToFifth(idx)) return;
               add("error", "The second leading tone (" + a[idx].name + ", " + VOICES[idx] +
                   ") goes to " + b[idx].name + " \u2014 with one copy rising, the other must rise too or " +
-                  "drop to the fifth of the tonic, " + letterText(1, fifth) + ".");
+                  "drop to the fifth of the tonic, " + letterText(1, fifth) + ".",
+                  null, { move:i, voices:[idx] });
             });
           }
         }
@@ -2133,6 +2151,19 @@
       b.items.forEach(function(item){
         var row = document.createElement("li");
         row.className = item.level;
+        if (item.hear){
+          var ear = document.createElement("button");
+          ear.type = "button";
+          ear.className = "hear";
+          ear.title = item.hear.move != null
+            ? "Hear these voices move, then hear it without the fault"
+            : "Hear the chord, then these two voices";
+          ear.setAttribute("aria-label", ear.title);
+          ear.textContent = "\u25B6";
+          ear.addEventListener("click", function(){ hearFinding(item.hear); });
+          row.appendChild(ear);
+          row.className += " hearable";
+        }
         var cut = item.strong ? item.text.indexOf(item.strong) : -1;
         if (cut < 0) row.textContent = item.text;
         else {
@@ -2240,6 +2271,7 @@
   tempo.addEventListener("input", function(){ tempoOut.textContent = tempo.value + " bpm"; });
   var playTimer = null, ringTimer = null, playingSlot = null;
   function stopPlayback(){
+    if (hearTimer){ clearTimeout(hearTimer); hearTimer = null; }
     if (playTimer){ clearTimeout(playTimer); playTimer = null; }
     if (ringTimer){ clearTimeout(ringTimer); ringTimer = null; }
     playingSlot = null;
@@ -2767,6 +2799,72 @@
     setup.hidden = false;
     drawSetup();
   });
+
+  /* ---------- hearing a fault ---------------------------------------------
+     A sentence about parallel octaves is a sentence; the two voices sounded
+     on their own, collapsing into one colour as they move, is the thing
+     itself. Every finding that knows which notes it is about can be played:
+     the voices in question alone, the chord before and then the chord after,
+     and — where the app can write a chord that does not have the fault — the
+     same move again with it corrected, to hear the difference rather than
+     read about it. */
+  var hearTimer = null;
+  function stopHearing(){
+    if (hearTimer){ clearTimeout(hearTimer); hearTimer = null; }
+  }
+  function hearSteps(list){
+    stopHearing();
+    stopPlayback();
+    var i = 0;
+    (function next(){
+      if (i >= list.length){ playingSlot = null; hearTimer = null; render(); return; }
+      var step = list[i++];
+      playingSlot = step.slot == null ? null : step.slot;
+      step.notes.forEach(function(n){ play(n.slot, n.step, step.ms * 1.5); });
+      render();
+      hearTimer = setTimeout(next, step.ms);
+    })();
+  }
+  function voiceNotes(rows, slot, voices){
+    return voices.map(function(v){ return { slot:slot, step:rows[slot][v].step }; });
+  }
+  /* the same two voices again, out of a chord written without the fault */
+  function correctedPair(h, rows){
+    var slot = h.move + 1, was = state.notes, out = null;
+    var answer = solveChord(slot);
+    if (!answer) return null;
+    state.notes = state.notes.filter(function(n){ return n.slot !== slot; }).concat(answer);
+    updateVoices();
+    var fixedRows = chordVoices();
+    if (fixedRows && fixedRows[slot]) out = voiceNotes(fixedRows, slot, h.voices);
+    state.notes = was;
+    updateVoices();
+    return out;
+  }
+  function hearFinding(h){
+    var rows = chordVoices();
+    if (!rows) return;
+    var steps = [];
+    if (h.move != null){
+      if (!rows[h.move] || !rows[h.move + 1]) return;
+      var from = voiceNotes(rows, h.move, h.voices);
+      var to = voiceNotes(rows, h.move + 1, h.voices);
+      steps.push({ slot:h.move, notes:from, ms:850 });
+      steps.push({ slot:h.move + 1, notes:to, ms:1150 });
+      var fixed = correctedPair(h, rows);
+      if (fixed){
+        steps.push({ slot:null, notes:[], ms:500 });       /* a breath between the two */
+        steps.push({ slot:h.move, notes:from, ms:850 });
+        steps.push({ slot:h.move + 1, notes:fixed, ms:1300 });
+      }
+    } else if (h.chord != null){
+      if (!rows[h.chord]) return;
+      steps.push({ slot:h.chord, notes:rows[h.chord].map(function(n){
+        return { slot:h.chord, step:n.step }; }), ms:900 });   /* the chord it is in */
+      steps.push({ slot:h.chord, notes:voiceNotes(rows, h.chord, h.voices), ms:1300 });
+    }
+    if (steps.length) hearSteps(steps);
+  }
 
   /* ---------- show me one -------------------------------------------------
      The checker knows every rule; turned round, it can answer as well as
