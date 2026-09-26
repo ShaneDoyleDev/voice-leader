@@ -188,6 +188,7 @@
 
   .staffwrap{
     display:block; padding:18px 4px 2px; cursor:crosshair;
+    overflow-x:auto; overflow-y:hidden;
     touch-action:none; outline:none;
     user-select:none; -webkit-user-select:none;   /* a double click removes, never selects */
   }
@@ -348,7 +349,7 @@
     /* the staff is most of a phone screen, so the checkbar would sit below
        the fold at the moment it has something to say */
     .checkbar{position:sticky; bottom:0; background:var(--surface); z-index:2}
-    .staffwrap{overflow-x:auto; overflow-y:hidden; padding:16px 0 2px;
+    .staffwrap{padding:16px 0 2px;
                touch-action:pan-x pan-y pinch-zoom}
     /* the wedges are the smallest thing to aim at, and the inner ring of
        relative minors the smallest of those. The circle takes the whole
@@ -810,22 +811,37 @@
   function narrow(){
     try { return window.matchMedia(PHONE).matches; } catch (e) { return false; }
   }
+  /* The canvas is as wide as the progression needs: 108 units a chord, the
+     spacing a short progression already gets, and never less than the 640 a
+     staff has always been drawn on. A long progression is no longer squeezed
+     into the width that happens to be there — squeezing was what crowded the
+     columns and ran one chord's tone letters into the next one's. */
+  var MIN_UNIT_PX = 7.5 / HALF;          /* what a half-step must not go under */
+  function canvasFor(n){
+    return Math.max(640, Math.round(SIG_X + sigWidth(S) + 46 + 108 * (n - 1) + 62));
+  }
   function fitStaff(){
-    var n = Math.max(1, state.chords.length);
-    if (!narrow()){
-      CANVAS = 640;
-      svg.style.width = "";
-      svg.style.height = "";
-      svg.setAttribute("viewBox", "0 0 " + CANVAS + " " + VIEW_H);
-      unitPx = (svg.getBoundingClientRect().width || CANVAS) / CANVAS;
-      return;
-    }
-    CANVAS = Math.round(SIG_X + sigWidth(S) + 46 + 108 * (n - 1) + 62);
-    /* the staff is the page's one irreplaceable element, so it takes what
-       height it can — but not so much that the toolbar under it is offscreen */
-    var room = (window.innerHeight || 700) * 0.52;
-    unitPx = Math.max(8 / HALF, Math.min(12 / HALF, room / VIEW_H));
+    CANVAS = canvasFor(Math.max(1, state.chords.length));
     svg.setAttribute("viewBox", "0 0 " + CANVAS + " " + VIEW_H);
+    if (narrow()){
+      /* on a phone the height is what binds: the staff takes what it can of
+         the screen, within a half-step of 8 to 12 pixels, and pans */
+      var room = (window.innerHeight || 700) * 0.52;
+      unitPx = Math.max(8 / HALF, Math.min(12 / HALF, room / VIEW_H));
+    } else {
+      /* elsewhere it fills the width it is given, and pans only when that
+         width would print the staff smaller than it can be read at */
+      var had = svg.style.width;
+      svg.style.width = "";
+      var fits = (wrap.clientWidth || svg.getBoundingClientRect().width || CANVAS) / CANVAS;
+      if (fits >= MIN_UNIT_PX){
+        svg.style.height = "";
+        unitPx = fits;
+        return;                          /* scales to the panel, as it always has */
+      }
+      svg.style.width = had;
+      unitPx = MIN_UNIT_PX;
+    }
     svg.style.width = Math.round(CANVAS * unitPx) + "px";
     svg.style.height = Math.round(VIEW_H * unitPx) + "px";
   }
