@@ -697,6 +697,27 @@
     var plain = KEYS[mode].filter(function(k){ return Math.abs(k[1]) <= 4; });
     return { mode:mode, tonic:pick(plain)[0] };
   }
+  /* the same note priced in semitones under a given chord, so a line can
+     tell an augmented second from a minor third before it writes one */
+  function midiUnder(chord, step){
+    var l = step % 7;
+    return (Math.floor(step / 7) + 1) * 12 + SEMIS[l] + alterFor(chord, l);
+  }
+  /* An interval no line should be asked to sing: anything augmented, and
+     anything diminished. In minor these are close at hand — the sixth
+     degree and the raised leading tone are an augmented second apart — so
+     a generated line has to know about them or it will hand you a fault of
+     its own making in a voice you are not allowed to change. */
+  function awkward(fromStep, fromChord, toStep, toChord){
+    if (fromStep === toStep) return false;
+    var up = toStep > fromStep;
+    var lo = up ? fromStep : toStep, hi = up ? toStep : fromStep;
+    var loMidi = midiUnder(up ? fromChord : toChord, lo);
+    var hiMidi = midiUnder(up ? toChord : fromChord, hi);
+    var dia = hi - lo, off = (hiMidi - loMidi) - (SEMIS[dia % 7] + 12 * Math.floor(dia / 7));
+    var perfect = (dia % 7 === 0 || dia % 7 === 3 || dia % 7 === 4);
+    return off > 0 || (perfect ? off < 0 : off < -1);
+  }
   function stepsFor(letter, lo, hi){
     var out = [], step;
     for (step = lo; step <= hi; step++) if (step % 7 === letter) out.push(step);
@@ -744,14 +765,27 @@
   /* the next note of a written line: a step or two is likeliest, a leap
      beyond a sixth never happens, a repeat is allowed but rare, and of the
      notes that qualify the one nearest the contour is likeliest of all */
-  function nextInLine(prev, letters, lo, hi, leap, target, next){
+  function nextInLine(prev, letters, lo, hi, leap, target, next, avoid, cameFrom){
     var cands = [];
     letters.forEach(function(l){ cands = cands.concat(stepsFor(l, lo, hi)); });
     if (!cands.length) return prev;
+    /* an awkward interval is dropped outright, so long as dropping it
+       leaves the line anything at all to choose from */
+    if (avoid){
+      var plain = cands.filter(function(s){ return !avoid(s); });
+      if (plain.length) cands = plain;
+    }
+    /* and a line that has just leapt would rather turn back than press on */
+    var leapt = (cameFrom != null && Math.abs(prev - cameFrom) >= 4)
+              ? (prev > cameFrom ? 1 : -1) : 0;
     var scored = cands.map(function(step){
       var d = Math.abs(step - prev);
       var w = d === 0 ? 0.5 : d <= 2 ? 3 : d <= 4 ? 1.3 : d <= leap ? 0.4 : 0;
       if (w && target != null) w *= Math.pow(0.55, Math.abs(step - target));   /* pull to the shape */
+      if (w && leapt){
+        var dir = step === prev ? 0 : step > prev ? 1 : -1;
+        w *= (dir === -leapt && d === 1) ? 3 : dir === leapt ? 0.2 : 1;
+      }
       return { step:step, w:w };
     }).filter(function(c){ return c.w > 0; });
     if (next){                        /* not into a corner, if there is a way round it */
@@ -776,21 +810,22 @@
     /* the roots are fixed, so the shape is carried by which octave each one
        is written in — the line still rises and falls as a whole */
     var aim = contour(chords.length, 18 + Math.floor(Math.random() * 3), 6);
-    var line = [], prev = null;
+    var line = [], prev = null, prevDegree = null, before = null;
     chords.forEach(function(degree, i){
       var letter = chordLetters(degree)[0];
       var next = i + 1 < chords.length ? [chordLetters(chords[i + 1])[0]] : null;
       var step = prev == null
         ? toneNear([letter], BASS_LO, BASS_HI, aim[0], next, 5)
-        : nextInLine(prev, [letter], BASS_LO, BASS_HI, 5, aim[i], next);
+        : nextInLine(prev, [letter], BASS_LO, BASS_HI, 5, aim[i], next,
+            function(sp){ return awkward(prev, prevDegree, sp, degree); }, before);
       line.push(step);
-      prev = step;
+      before = prev; prev = step; prevDegree = degree;
     });
     return line;
   }
   function makeSoprano(chords){
     var aim = contour(chords.length, 29 + Math.floor(Math.random() * 3), 6);
-    var line = [], prev = null, prevDegree = null;
+    var line = [], prev = null, prevDegree = null, before = null;
     chords.forEach(function(degree, i){
       var tones = chordLetters(degree), last = i === chords.length - 1, step;
       /* the closing chord is written on its root alone, so it is the one
@@ -803,10 +838,11 @@
       } else if (prevDegree === 5 && prev % 7 === leadingLetter() && degree === 1){
         step = prev + 1;            /* a leading tone in the soprano has one move: up a step */
       } else {
-        step = nextInLine(prev, last ? [tones[0]] : tones, SOP_LO, SOP_HI, 4, aim[i], next);
+        step = nextInLine(prev, last ? [tones[0]] : tones, SOP_LO, SOP_HI, 4, aim[i], next,
+          function(sp){ return awkward(prev, prevDegree, sp, degree); }, before);
       }
       line.push(step);
-      prev = step; prevDegree = degree;
+      before = prev; prev = step; prevDegree = degree;
     });
     return line;
   }
@@ -1701,6 +1737,18 @@
     return quality ? quality + " " + name : name;
   }
   function withArticle(str){ return (/^[aeiou]/i.test(str) ? "an " : "a ") + str; }
+  /* An interval read along one voice rather than across two. The notes are
+     put in order so they can be named, and the direction handed back
+     separately: a line leaps up or it leaps down, and the difference is
+     half of what the rules about leaping are about. */
+  function melodic(from, to){
+    var up = to.midi > from.midi, lo = up ? from : to, hi = up ? to : from;
+    var dia = hi.step - lo.step;
+    var off = (hi.midi - lo.midi) - (MAJOR_SEMIS[dia % 7] + 12 * Math.floor(dia / 7));
+    var perfect = (dia % 7 === 0 || dia % 7 === 3 || dia % 7 === 4);
+    return { dia:dia, up:up, aug: off > 0, dim: perfect ? off === -1 : off === -2,
+             name: intervalName(lo, hi) || (dia + 1) + "th" };
+  }
 
   function voicesOf(slot){
     return state.notes.filter(function(n){ return n.slot === slot; })
@@ -2023,7 +2071,7 @@
               " \u2013 " + after.name + ". A second inversion holds its bass under the chord " +
               "either side of it \u2014 pedal, or cadential \u2014 or is approached and left by " +
               "step, which is the passing kind. A bass that leaps in or out is none of them.",
-              "six-four", { bass: (slot > 0 ? [slot - 1] : []).concat([slot, slot + 1]) });
+              "six-four", { line: (slot > 0 ? [slot - 1] : []).concat([slot, slot + 1]) });
       }
 
       /* completeness — the fifth is the one tone that may be left out */
@@ -2065,13 +2113,29 @@
           add("error", what + " \u2014 a seventh is a dissonance and wants one voice; " +
               "both copies would have to fall by step.", "seventh");
         }
+        /* A diminished chord is the exception the other way about. Its root
+           is the leading tone and its fifth is the interval the chord is
+           named for, so the third is the one tone left that can take a
+           second voice — and vii°6, with that third in the bass, is how the
+           chord is usually written. */
+        else if (idx === 1 && quality(degree) === "dim")
+          add(counts[l] === 2 && !hasSeventh(degree) ? "ok" : "caution",
+              what + (counts[l] === 2 && !hasSeventh(degree)
+                ? " \u2014 the tone to double in a diminished chord: its root is the leading " +
+                  "tone and its fifth is what the chord is named for, so the third is the one " +
+                  "left that can take a second voice."
+                : " \u2014 the third is the right tone to double in a diminished chord, but " +
+                  "this many voices on it mean another tone has gone missing."));
         else if (idx === 1 && quality(degree) === "min" && counts[l] === 2)
           add("ok", what + " \u2014 ordinary in a minor triad.");
         else if (idx === 1)
           add("caution", what + " \u2014 the weaker double" +
               (lowIdx === 1 ? ", and it is the bass as well" : "") +
               "; the root or the fifth is the safer choice.");
-        else add("ok", what + ".");
+        /* the doubled leading tone draws its own line just below; saying
+           "doubles the root" cheerfully above it reads as a contradiction */
+        else if (!(l === leadingLetter() && (deg(degree) === 5 || deg(degree) === 7)))
+          add("ok", what + ".");
       });
 
       /* the leading tone doubled, in a dominant or in the chord built on it.
@@ -2169,6 +2233,54 @@
           add("error", VOICES[ov] + " rises to " + nowLow.name + ", over the " +
               VOICES[ov + 1] + "'s " + wasHigh.name + " \u2014 the voices have overlapped.",
               "overlapped", { move:i, voices:[ov, ov + 1], name:true });
+      }
+
+      /* Each voice read as a line of its own. Everything else here reads
+         across the voices at one moment; this reads along one of them, and
+         a line has rules the vertical ones never touch. The bass is left
+         out of the one about recovering a leap: it is a harmonic line
+         rather than a melodic one, and leaps where it likes. */
+      var pre = i > 0 ? voicesAt(i - 1) : null;
+      if (pre && pre.length !== MAX_VOICES) pre = null;
+      for (var m = 0; m < MAX_VOICES; m++){
+        var mv = melodic(a[m], b[m]), went = a[m].name + " to " + b[m].name;
+        if (mv.aug){
+          var sixth = (tonicLetter() + 5) % 7;
+          var trap = state.mode === "minor" && mv.dia === 1 &&
+                     (a[m].letter === sixth || b[m].letter === sixth) &&
+                     (a[m].letter === leadingLetter() || b[m].letter === leadingLetter());
+          add("error", VOICES[m] + " moves " + withArticle(mv.name) + ", " + went + " \u2014 " +
+              (trap
+                ? "the gap minor leaves between its sixth degree and its raised leading tone. " +
+                  "It is the interval a voice never takes: turn the line back rather than " +
+                  "reach across it."
+                : "an augmented interval is not something a voice sings; a line goes round one."),
+              mv.name, { move:i, voices:[m] });
+        } else if (mv.dia === 6 || mv.dia > 7){
+          add("error", VOICES[m] + " leaps " + withArticle(mv.name) + ", " + went + " \u2014 " +
+              (mv.dia === 6
+                ? "a seventh is the leap a line never makes; it is heard as two notes rather " +
+                  "than as one move."
+                : "further than an octave is past what a voice does in a single move."),
+              mv.name, { move:i, voices:[m] });
+        } else if (mv.dia === 7 && m > 0){
+          add("caution", VOICES[m] + " leaps an octave, " + went +
+              " \u2014 the bass does this freely; an upper voice rarely wants to.",
+              "an octave", { move:i, voices:[m] });
+        }
+        if (!pre) continue;
+        var was = melodic(pre[m], a[m]);
+        if (was.dim && !(mv.dia === 1 && mv.up !== was.up))
+          add("caution", VOICES[m] + " leaps " + withArticle(was.name) + ", " + pre[m].name +
+              " to " + a[m].name + ", and then " +
+              (mv.dia === 0 ? "stays there" : (mv.up ? "rises" : "falls") + " to " + b[m].name) +
+              " \u2014 a diminished interval passes where the next note steps back inside it.",
+              was.name, { line:[i - 1, i, i + 1], voice:m });
+        if (m > 0 && was.dia >= 5 && mv.dia > 0 && was.up === mv.up)
+          add("caution", VOICES[m] + " leaps " + withArticle(was.name) + " and then carries on " +
+              "the same way, " + pre[m].name + " to " + a[m].name + " to " + b[m].name +
+              " \u2014 a leap that size wants the line to turn back after it, by step for " +
+              "preference.", null, { line:[i - 1, i, i + 1], voice:m });
       }
 
       /* The seventh falls by step. It is the whole reason the chord is
@@ -2272,7 +2384,7 @@
           ear.className = "hear";
           ear.title = item.hear.move != null
             ? "Hear these voices move, then hear it without the fault"
-            : item.hear.bass ? "Hear the bass through these chords"
+            : item.hear.line ? "Hear this voice through these chords"
             : "Hear the chord, then these two voices";
           ear.setAttribute("aria-label", ear.title);
           ear.textContent = "\u25B6";
@@ -2973,13 +3085,16 @@
         steps.push({ slot:h.move, notes:from, ms:850 });
         steps.push({ slot:h.move + 1, notes:fixed, ms:1300 });
       }
-    } else if (h.bass){
-      /* one line across several chords, which is how a six-four is heard:
-         the bass is going somewhere or it is not */
-      for (var k = 0; k < h.bass.length; k++){
-        if (!rows[h.bass[k]]) return;
-        steps.push({ slot:h.bass[k], notes:[{ slot:h.bass[k], step:bassOf(rows[h.bass[k]]).step }],
-                     ms: k === h.bass.length - 1 ? 1200 : 800 });
+    } else if (h.line){
+      /* one voice across several chords: how a six-four's bass is heard,
+         and how a leap and whatever follows it is heard. Without a voice
+         named it is the lowest note of each chord that sounds. */
+      for (var k = 0; k < h.line.length; k++){
+        var row = rows[h.line[k]];
+        if (!row) return;
+        var one = h.voice == null ? bassOf(row) : row[h.voice];
+        steps.push({ slot:h.line[k], notes:[{ slot:h.line[k], step:one.step }],
+                     ms: k === h.line.length - 1 ? 1200 : 800 });
       }
     } else if (h.chord != null){
       if (!rows[h.chord]) return;
@@ -3023,6 +3138,30 @@
      thing they are. With no chord behind it, a comfortable soprano stands
      in for smoothness. */
   var SOLVE_HOME = [20, 25, 29, 33];              /* B♭2, G3, D4, A4 — the middle of each voice */
+  /* a voice arriving at this chord by a diminished leap. It is legal, but it
+     leaves that voice owing a step back inside the leap, and the chord after
+     this one may not have that step to give. */
+  function dimLeap(slot, c, prev){
+    for (var i = 0; i < 4 && i < prev.length; i++){
+      var span = Math.abs(c[i] - prev[i].step);
+      if (!span) continue;
+      var off = Math.abs(midiAt(slot, c[i]) - midiAt(slot - 1, prev[i].step)) -
+                (MAJOR_SEMIS[span % 7] + 12 * Math.floor(span / 7));
+      var pure = (span % 7 === 0 || span % 7 === 3 || span % 7 === 4);
+      if (pure ? off === -1 : off === -2) return true;
+    }
+    return false;
+  }
+  /* Two faults cannot be seen at the moment a chord is written: a six-four
+     is judged by what stands after it, and a diminished leap by whether the
+     next note steps back inside. The checklist can wait for the chord after;
+     a search choosing this one cannot, so it treats both as things to take
+     only when nothing plainer will do. */
+  function risky(slot, c, prev, tones){
+    if (!hasSeventh(state.chords[slot]) && tones.indexOf(c[0] % 7) === 2 &&
+        !filled(slot + 1)) return true;
+    return dimLeap(slot, c, prev);
+  }
   function costOf(slot, c, prev, tones){
     var cost = 0, i;
     for (i = 0; i < 4 && i < prev.length; i++)
@@ -3038,6 +3177,7 @@
        a voice for its register — but an answer with the bass on middle C is
        not one worth showing anybody. */
     for (i = 0; i < 4; i++) cost += Math.abs(c[i] - SOLVE_HOME[i]) * 0.35;
+    if (dimLeap(slot, c, prev)) cost += 6;
     /* and root position, strongly. The plainest right answer is the one to
        hand somebody who is stuck, so an inversion has to earn its place by
        saving a good deal of movement; and a six-four has to earn far more
@@ -3098,7 +3238,7 @@
          anybody, so the search goes on past one. Sometimes every answer is
          like that — a seventh with nowhere to fall — and then the best of
          them is given, cautions and all. */
-      if (rep.cautions > base){
+      if (rep.cautions > base || risky(slot, c, prev, tones)){
         grumbled = grumbled || trial;
         continue;
       }
