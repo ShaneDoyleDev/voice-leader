@@ -602,14 +602,21 @@
     var sev = semis[3] - semis[0];
     return sev === 9 ? "d7" : sev === 10 ? "m7" : "M7";
   }
-  function numeralOf(chord){
+  /* The numeral without its figure. A seventh's 7 is a figure like any
+     other — it is what 6/5 and 4/3 replace when the chord is inverted — so
+     it is put on separately and only where it belongs. */
+  function numeralBase(chord){
     var roman = ROMAN[deg(chord) - 1], q = quality(chord);
     if (q === "min" || q === "dim") roman = roman.toLowerCase();
     var mark = q === "dim" ? "\u00B0" : q === "aug" ? "+" : "";
-    if (!hasSeventh(chord)) return roman + mark;
     /* a diminished triad under a minor seventh is the half-diminished sign */
-    if (q === "dim") mark = seventhKind(chord) === "d7" ? "\u00B0" : "\u00F8";
-    return roman + mark + "7";
+    if (hasSeventh(chord) && q === "dim")
+      mark = seventhKind(chord) === "d7" ? "\u00B0" : "\u00F8";
+    return roman + mark;
+  }
+  /* the chord as it was chosen, before anything stands under it */
+  function numeralOf(chord){
+    return numeralBase(chord) + (hasSeventh(chord) ? "7" : "");
   }
   function alterFor(chord, letter){
     var base = keyAlters()[letter];
@@ -671,9 +678,9 @@
 
   /* ---------- drills ------------------------------------------------------
      A drill writes one voice for you and asks for the other three, the way
-     four-part writing is actually taught. Nothing downstream changes: a
-     generated bass figures its own chords through inversionOf(), and the
-     checklist grades the answer exactly as it grades free voicing. */
+     four-part writing is actually taught. Nothing downstream changes: the
+     figure is read off whatever is lowest, and the checklist grades the
+     answer exactly as it grades free voicing. */
   function pick(list){ return list[Math.floor(Math.random() * list.length)]; }
   /* where each degree usually goes next — no degree repeats itself, and the
      progression is closed with V–I so there is a cadence to write into */
@@ -761,8 +768,10 @@
   /* C4 to F5 — a step short of the soprano’s top, so a leading tone always
      has the one note above it that it is obliged to rise to */
   var SOP_LO  = 28, SOP_HI  = 38;
-  /* Every chord stands on its own root — the exercise is about the three
-     voices above the bass, not about reading an inversion. */
+  /* Every chord stands on its own root. Inversions are written freely
+     anywhere else; a given bass keeps to the root so that this exercise
+     stays about the three voices above it rather than about reading a
+     figure off the page. */
   function makeBass(chords){
     /* the roots are fixed, so the shape is carried by which octave each one
        is written in — the line still rises and falls as a whole */
@@ -1064,8 +1073,9 @@
                          "text-anchor":"middle", "font-family":"Spectral, Georgia, serif",
                          "font-size":16, "font-weight": complete ? 600 : 500,
                          "letter-spacing":"0.04em", opacity:dim});
-      t.appendChild(document.createTextNode(numeralOf(degree)));
       var fig = inversionOf(i);
+      t.appendChild(document.createTextNode(
+        fig == null ? numeralOf(degree) : numeralBase(degree)));
       if (fig){
         var six = el("tspan",{dy:-5, "font-size":9.5});
         six.textContent = fig.charAt(0);
@@ -1671,6 +1681,7 @@
   var VOICES = ["Bass", "Tenor", "Alto", "Soprano"];
   var VOICE_SHORT = ["B", "T", "A", "S"];
   var ROLES = ["root", "third", "fifth", "seventh"];
+  var POSITIONS = ["Root position", "First inversion", "Second inversion", "Third inversion"];
 
   /* Name an interval the way a theory class would: the diatonic distance
      gives the number, the semitones give the quality. */
@@ -1710,14 +1721,23 @@
      go — and neither can the fifth of a diminished triad, which is the
      interval the chord is named for. */
   function needsFifth(slot){ return quality(state.chords[slot]) === "dim"; }
-  /* Root position only, for now. Inversions are a thing the app can read —
-     inversionOf() figures a chord off whatever is lowest — but not yet a
-     thing it accepts, so the lowest note has to be the root and no figure
-     ever appears on a chord that is right. */
-  function rootInBass(slot){
-    var notes = notesIn(slot);
-    if (!notes.length) return true;
-    return notes[0].step % 7 === chordLetters(state.chords[slot])[0];
+  /* Any tone of the chord may stand in the bass. Which one does is read off
+     the staff and printed as a figure under the numeral, and the two rules
+     that exist only once inversions do — what a six-four's bass has to be
+     doing, and an inverted seventh chord's completeness — are in the
+     checklist below. */
+  function bassOf(list){
+    return list.reduce(function(x, y){ return y.midi < x.midi ? y : x; });
+  }
+  /* The fifth is the one tone that may be left out, and only under a chord
+     standing on its root. An inverted seventh chord has one voice for each
+     of its four tones and none to spare; and a diminished triad cannot give
+     up the interval it is named for. */
+  function fifthMayGo(slot){
+    if (needsFifth(slot)) return false;
+    var tones = chordLetters(state.chords[slot]), notes = notesIn(slot);
+    if (tones.length < 4) return true;                     /* a plain triad */
+    return !notes.length || notes[0].step % 7 === tones[0];
   }
   function chordIsClean(slot){
     var count = slotCount(slot);
@@ -1728,11 +1748,10 @@
       if (tones.indexOf(letter) === -1) return false;          /* a note outside the chord */
       seen[letter] = true;
     }
-    if (!rootInBass(slot)) return false;
-    /* the fifth is the one tone that may go — and in a seventh chord the
-       seventh is the least dispensable of all, being what names it */
+    /* in a seventh chord the seventh is the least dispensable of all,
+       being the note the chord is named for */
     if (tones.length > 3 && !seen[tones[3]]) return false;
-    return !!(seen[tones[0]] && seen[tones[1]] && (!needsFifth(slot) || seen[tones[2]]));
+    return !!(seen[tones[0]] && seen[tones[1]] && (fifthMayGo(slot) || seen[tones[2]]));
   }
   /* the letters name four parts, so they wait for four notes */
   function firstChordVoices(){
@@ -1833,14 +1852,28 @@
     return rows;
   }
 
-  /* Once a chord is right — four voices, all of them chord tones, all three
-     tones there — the lowest sounding note figures it: the root takes none,
-     the third makes it a six, the fifth a six-four. Anything short of that
-     goes unfigured; the checklist says why. */
+  /* Once a chord is right — every voice a tone of it, nothing missing that
+     could not be spared — the lowest sounding note figures it. A triad takes
+     nothing, a 6 or a 6/4; a seventh chord takes 7, 6/5, 4/3 or 4/2. Short
+     of right the figure is unknown rather than absent, which is null here,
+     and the numeral is printed as it was chosen instead. */
+  var FIGURES = { triad:["", "6", "64"], seventh:["7", "65", "43", "42"] };
   function inversionOf(slot){
-    if (!chordIsClean(slot)) return "";      /* no figure for a chord that is not yet right */
-    var at = chordLetters(state.chords[slot]).indexOf(notesIn(slot)[0].step % 7);
-    return at === 1 ? "6" : at === 2 ? "64" : "";
+    if (!chordIsClean(slot)) return null;                  /* not yet readable */
+    var chord = state.chords[slot];
+    var at = chordLetters(chord).indexOf(notesIn(slot)[0].step % 7);
+    if (at < 0) return null;
+    return (hasSeventh(chord) ? FIGURES.seventh : FIGURES.triad)[at];
+  }
+  /* the same figure on one line, where nothing can be stacked */
+  function figureText(fig){
+    return fig.length > 1 ? fig.charAt(0) + "/" + fig.charAt(1) : fig;
+  }
+  /* the numeral as it now reads off the staff, figure and all */
+  function numeralAt(slot){
+    var fig = inversionOf(slot);
+    return fig == null ? numeralOf(state.chords[slot])
+                       : numeralBase(state.chords[slot]) + figureText(fig);
   }
   function figureNode(fig){
     var f = document.createElement("span");
@@ -1853,8 +1886,9 @@
     return f;
   }
   function numeralInto(node, slot){
-    node.appendChild(document.createTextNode(numeralOf(state.chords[slot])));
     var fig = inversionOf(slot);
+    node.appendChild(document.createTextNode(
+      fig == null ? numeralOf(state.chords[slot]) : numeralBase(state.chords[slot])));
     if (fig) node.appendChild(figureNode(fig));
   }
   /* A chord is written once its four voices are there, whether or not they
@@ -1901,10 +1935,10 @@
     if (tones.length > 3 && !seen[tones[3]])
       return name + " is missing its seventh, " + letterText(degree, tones[3]) +
              " \u2014 the note the chord is named for.";
-    if (!rootInBass(slot))
-      return name + " has " + nameAt(slot, notes[0].step) + " at the bottom \u2014 " +
-             "only root position for now, so the lowest note wants to be " +
-             letterText(degree, tones[0]) + ".";
+    if (!fifthMayGo(slot) && !needsFifth(slot) && !seen[tones[2]])
+      return name + " is missing its fifth, " + letterText(degree, tones[2]) +
+             " \u2014 away from root position a seventh chord has a voice for each of its " +
+             "four tones and none to spare.";
     if (slot === 0 && notes.length < MAX_VOICES)
       return "The opening chord needs all four voices \u2014 it names them for the rest.";
     return null;
@@ -1954,12 +1988,43 @@
             spell(degree) + ".", n.name);
       });
 
-      /* root position only, for now */
-      var low = v.reduce(function(x, y){ return y.midi < x.midi ? y : x; });
-      if (tones.indexOf(low.letter) > -1 && low.letter !== tones[0])
-        add("error", "The bass is on " + low.name + ", the " + ROLES[tones.indexOf(low.letter)] +
-            " of the chord \u2014 only root position for now, so the lowest note wants to be " +
-            letterText(degree, tones[0]) + ".", "root position");
+      /* which tone is in the bass, which is what the figure reads */
+      var low = bassOf(v), lowIdx = tones.indexOf(low.letter);
+      if (lowIdx > 0)
+        add("ok", POSITIONS[lowIdx] + " \u2014 the " + ROLES[lowIdx] + ", " + low.name +
+            ", in the bass.");
+
+      /* A six-four is not a chord one simply chooses. Its bass is held under
+         what stands either side of it — the pedal and the cadential kinds —
+         or it is approached and left by step, which is the passing kind and
+         its neighbouring cousin. A bass that leaps in or out is the six-four
+         a student is warned about, and that is the whole of the rule as it is
+         taught. A seventh chord is exempt: its 4/3 is an ordinary chord,
+         dissonant already and resolving like the rest. Nothing is said until
+         the next chord is there to decide it. */
+      if (lowIdx === 2 && !hasSeventh(degree) && slot + 1 < depth){
+        var after = bassOf(voicesAt(slot + 1));
+        var before = slot > 0 ? bassOf(voicesAt(slot - 1)) : null;
+        var held = after.step === low.step, sat = !!before && before.step === low.step;
+        var inBy = before ? low.step - before.step : null, outBy = after.step - low.step;
+        var stepped = Math.abs(outBy) === 1 && (inBy == null || Math.abs(inBy) === 1);
+        var use = sat && held ? "A pedal six-four"
+                : held ? "A cadential six-four"
+                : !stepped ? null
+                : (inBy == null || inBy * outBy > 0) ? "A passing six-four"
+                : "A neighbouring six-four";
+        if (use)
+          add("ok", use + " \u2014 the bass " +
+              (held ? "holds under what follows" : "steps in and steps out") +
+              ", which is what a second inversion is for.");
+        else
+          add("caution", "The bass leaps " + (before && Math.abs(inBy) > 1 ? "into" : "out of") +
+              " this six-four: " + (before ? before.name + " \u2013 " : "") + low.name +
+              " \u2013 " + after.name + ". A second inversion holds its bass under the chord " +
+              "either side of it \u2014 pedal, or cadential \u2014 or is approached and left by " +
+              "step, which is the passing kind. A bass that leaps in or out is none of them.",
+              "six-four", { bass: (slot > 0 ? [slot - 1] : []).concat([slot, slot + 1]) });
+      }
 
       /* completeness — the fifth is the one tone that may be left out */
       var seventh = tones.length > 3;
@@ -1973,6 +2038,10 @@
         } else if (needsFifth(slot)){
           add("error", "Missing its fifth, " + letterText(degree, l) +
               " \u2014 a diminished triad cannot do without it; the diminished fifth is what makes it one.");
+        } else if (!fifthMayGo(slot)){
+          add("error", "Missing its fifth, " + letterText(degree, l) +
+              " \u2014 this seventh chord is not standing on its root, and away from root " +
+              "position it has a voice for each of its four tones and none to spare.", "fifth");
         } else if (counts[tones[0]] > (seventh ? 1 : 2)){
           add("ok", "No fifth, root " + (seventh ? "doubled" : "tripled") +
               " \u2014 the usual way to leave it out.");
@@ -1999,14 +2068,19 @@
         else if (idx === 1 && quality(degree) === "min" && counts[l] === 2)
           add("ok", what + " \u2014 ordinary in a minor triad.");
         else if (idx === 1)
-          add("caution", what + " \u2014 the weaker double; the root or the fifth is the safer choice.");
+          add("caution", what + " \u2014 the weaker double" +
+              (lowIdx === 1 ? ", and it is the bass as well" : "") +
+              "; the root or the fifth is the safer choice.");
         else add("ok", what + ".");
       });
 
-      /* the leading tone doubled in a dominant */
-      if (deg(degree) === 5 && counts[leadingLetter()] > 1)
+      /* the leading tone doubled, in a dominant or in the chord built on it.
+         A first inversion puts it in the bass, where doubling it is easy to
+         do by accident. */
+      if ((deg(degree) === 5 || deg(degree) === 7) && counts[leadingLetter()] > 1)
         add("caution", "The leading tone " + letterText(degree, leadingLetter()) +
-            " is doubled \u2014 watch it on the next move: one copy still has to rise.");
+            " is doubled \u2014 the one note normally left single: both copies want to rise, " +
+            "and two voices rising to the tonic is a parallel octave.");
 
       if (v.length < MAX_VOICES && v.length >= 3)
         add("ok", v.length + " voices \u2014 spacing, crossing and the parallel checks want a fourth.");
@@ -2198,6 +2272,7 @@
           ear.className = "hear";
           ear.title = item.hear.move != null
             ? "Hear these voices move, then hear it without the fault"
+            : item.hear.bass ? "Hear the bass through these chords"
             : "Hear the chord, then these two voices";
           ear.setAttribute("aria-label", ear.title);
           ear.textContent = "\u25B6";
@@ -2770,8 +2845,8 @@
   document.getElementById("clearprog").addEventListener("click", function(){ state.chords = []; drawSetup(); });
 
   var TASK = {
-    bass:"<b>The bass is given.</b> Write the tenor, alto and soprano above it. Every chord " +
-         "stands on its root, so there is nothing figured \u2014 read the numerals.",
+    bass:"<b>The bass is given.</b> Write the tenor, alto and soprano above it. The given bass " +
+         "stands on the root of every chord, so nothing is figured \u2014 read the numerals.",
     soprano:"<b>The soprano is given.</b> Harmonise it \u2014 alto, tenor and bass under each " +
             "note. The figures follow whatever bass you write."
   };
@@ -2898,6 +2973,14 @@
         steps.push({ slot:h.move, notes:from, ms:850 });
         steps.push({ slot:h.move + 1, notes:fixed, ms:1300 });
       }
+    } else if (h.bass){
+      /* one line across several chords, which is how a six-four is heard:
+         the bass is going somewhere or it is not */
+      for (var k = 0; k < h.bass.length; k++){
+        if (!rows[h.bass[k]]) return;
+        steps.push({ slot:h.bass[k], notes:[{ slot:h.bass[k], step:bassOf(rows[h.bass[k]]).step }],
+                     ms: k === h.bass.length - 1 ? 1200 : 800 });
+      }
     } else if (h.chord != null){
       if (!rows[h.chord]) return;
       steps.push({ slot:h.chord, notes:rows[h.chord].map(function(n){
@@ -2909,8 +2992,8 @@
 
   /* ---------- show me one -------------------------------------------------
      The checker knows every rule; turned round, it can answer as well as
-     mark. The search is small enough to be exhaustive — the bass takes the
-     root, the voices above it any tone of the chord within reach of each
+     mark. The search is small enough to be exhaustive — the bass takes any
+     tone of the chord, the voices above it any tone within reach of each
      other — and every candidate is put on the staff and run past runChecks
      before it is offered. So an answer is right by the same reckoning that
      marks you, rather than by a second opinion that might disagree with it,
@@ -2955,6 +3038,13 @@
        a voice for its register — but an answer with the bass on middle C is
        not one worth showing anybody. */
     for (i = 0; i < 4; i++) cost += Math.abs(c[i] - SOLVE_HOME[i]) * 0.35;
+    /* and root position, strongly. The plainest right answer is the one to
+       hand somebody who is stuck, so an inversion has to earn its place by
+       saving a good deal of movement; and a six-four has to earn far more
+       than that, being a chord with conditions attached. */
+    var at = tones.indexOf(c[0] % 7);
+    if (at === 1 || at === 3) cost += 9;
+    else if (at === 2) cost += hasSeventh(state.chords[slot]) ? 9 : 22;
     return cost;
   }
   /* An answer that leaves the next chord nowhere to go is a poor answer, so
@@ -2964,13 +3054,15 @@
      is then real, and worth meeting. */
   var SOLVE_LOOKAHEAD = 8, SOLVE_TRIES = 400;
   function solveChord(slot, quick){
-    var root = chordLetters(state.chords[slot])[0], tones = chordLetters(state.chords[slot]);
+    var tones = chordLetters(state.chords[slot]);
     var given = state.notes.filter(function(n){ return n.slot === slot && n.given; });
     var kept = state.notes.filter(function(n){ return n.slot !== slot; });
     var prev = slot > 0 ? notesIn(slot - 1) : [];
-    var was = state.notes, cands = [], answer = null, fallback = null, clean = 0, i;
+    /* what the chords before this one are already being grumbled at for, so
+       that only this chord's own cautions count against a candidate */
+    var was = state.notes, cands = [], answer = null, fallback = null, grumbled = null;
+    var base = runChecks(slot).cautions, clean = 0, rep, i;
     tonePitches(slot, 16, 28).forEach(function(b){
-      if (b % 7 !== root) return;                       /* root position only */
       /* voices may meet: a complete seventh chord resolving to its tonic can
          leave a voice nowhere to go but onto its neighbour's note, and a
          search that wanted four distinct pitches would call that no answer */
@@ -2994,11 +3086,20 @@
       });
       state.notes = kept.concat(trial);
       updateVoices();
-      if (runChecks(slot + 1).errors) continue;
+      rep = runChecks(slot + 1);
+      if (rep.errors) continue;
       clean++;
       if (!quick && clean <= SOLVE_LOOKAHEAD && slot + 1 < state.chords.length &&
           !solveChord(slot + 1, true)){
         fallback = fallback || trial;       /* legal, but nothing can follow it */
+        continue;
+      }
+      /* An answer the checklist would then tut at is a poor thing to hand
+         anybody, so the search goes on past one. Sometimes every answer is
+         like that — a seventh with nowhere to fall — and then the best of
+         them is given, cautions and all. */
+      if (rep.cautions > base){
+        grumbled = grumbled || trial;
         continue;
       }
       answer = trial;
@@ -3006,7 +3107,7 @@
     }
     state.notes = was;
     updateVoices();
-    return answer || fallback;
+    return answer || grumbled || fallback;
   }
   function flashShow(word){
     var b = document.getElementById("showme");
@@ -3046,7 +3147,7 @@
   function blockLabel(label){
     return label.map(function(part){
       return typeof part === "number"
-        ? (part + 1) + " " + numeralOf(state.chords[part])
+        ? (part + 1) + " " + numeralAt(part)
         : part;
     }).join("");
   }
@@ -3058,7 +3159,7 @@
     out.push("Progression: " + state.chords.map(numeralOf).join(" \u2013 "));
     out.push("");
     state.chords.forEach(function(chord, slot){
-      var head = (slot + 1) + ". " + numeralOf(chord) + "  \u2014  " + spell(chord);
+      var head = (slot + 1) + ". " + numeralAt(slot) + "  \u2014  " + spell(chord);
       var notes = notesIn(slot), row = rows && rows[slot];
       if (!notes.length){ out.push(head + "  \u2014  not written yet"); return; }
       out.push(head);
@@ -3090,7 +3191,8 @@
     }
     out.push("");
     out.push("What is the voice leading like? Doubling, spacing, crossing and overlap, " +
-             "the leading tone, any seventh's resolution, and parallel fifths, octaves or unisons.");
+             "the leading tone, any seventh's resolution, the use made of any six-four, and " +
+             "parallel fifths, octaves or unisons.");
     return out.join("\n");
   }
   function flashExport(word){
