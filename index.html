@@ -273,6 +273,9 @@
   .block li.error::before{background:var(--wrong)}
   .block li.caution::before{background:var(--accent)}
   .block li.ok::before{background:var(--good)}
+  /* an observation rather than a judgement: an open ring, so the eye does
+     not read it as one more thing passed or failed */
+  .block li.note::before{background:transparent; box-shadow:inset 0 0 0 1.5px var(--ink-soft)}
 
   .readout{display:flex;flex-direction:column;gap:10px}
   .readout h2{
@@ -465,6 +468,8 @@
       <h2>Checklist</h2>
       <p class="verdict" id="verdict"></p>
       <ul class="findings" id="findings"></ul>
+      <h2 id="lineshead" hidden>Lines</h2>
+      <ul class="findings" id="lines" hidden></ul>
     </section>
 
     <div class="readout" style="margin-top:20px">
@@ -2337,7 +2342,132 @@
         }
       }
     }
+    /* and the lines themselves, once there is a whole progression to read
+       them from. A chord short of four voices leaves a gap in every line, so
+       nothing is said about any of them. */
+    var full = [], whole = depth === state.chords.length && depth >= LINE_MIN;
+    for (var q = 0; whole && q < depth; q++){
+      var line = voicesAt(q);
+      if (!line || line.length !== MAX_VOICES) whole = false;
+      else full.push(line);
+    }
+    report.lines = whole ? readLines(full) : [];
     return report;
+  }
+
+  /* ---------- the lines you wrote -----------------------------------------
+     Everything above reads across the voices — two of them at a moment, or
+     two moments of a pair. None of it reads a voice from end to end, so a
+     voicing can keep every rule and still be four parts of nothing: an alto
+     that never leaves a third, a bass standing on one note, a soprano with
+     no shape to it. What follows says what each line actually did.
+
+     It is deliberately not marking. Each observation states something you
+     can count off the staff yourself and then says why it matters, and none
+     of it reaches the verdict or the frontier: "All clear" goes on meaning
+     no rule broken. A voice with nothing worth saying about it is passed
+     over in silence, which is what keeps the rest worth reading. */
+  var LINE_MAX = 2;            /* at most two observations a voice */
+  var LINE_MIN = 4;            /* and nothing at all until there is a line to read */
+  function lineFacts(rows, v){
+    var notes = rows.map(function(r){ return r[v]; });
+    var f = { notes:notes, moves:notes.length - 1, repeats:0, steps:0, thirds:0, leaps:0,
+              widest:0, widestAt:0, turns:0, longestRun:1, runAt:0 };
+    var dir = 0, run = 1, i, d, mag, now;
+    for (i = 1; i < notes.length; i++){
+      d = notes[i].step - notes[i - 1].step;
+      mag = Math.abs(d);
+      if (!mag) f.repeats++; else if (mag === 1) f.steps++;
+      else if (mag === 2) f.thirds++; else f.leaps++;
+      if (mag > f.widest){ f.widest = mag; f.widestAt = i; }
+      if (!mag){ run++; if (run > f.longestRun){ f.longestRun = run; f.runAt = i; } }
+      else run = 1;
+      now = mag ? (d > 0 ? 1 : -1) : 0;
+      if (now && dir && now !== dir) f.turns++;
+      if (now) dir = now;
+    }
+    var lowAt = 0, highAt = 0;
+    for (i = 1; i < notes.length; i++){
+      if (notes[i].step < notes[lowAt].step) lowAt = i;
+      if (notes[i].step > notes[highAt].step) highAt = i;
+    }
+    f.low = notes[lowAt]; f.high = notes[highAt]; f.highAt = highAt;
+    f.range = f.high.step - f.low.step;
+    f.peaks = notes.filter(function(n){ return n.step === f.high.step; }).length;
+    return f;
+  }
+  /* the moves of a line counted out, so that anything said about it can be
+     checked off the staff rather than taken on trust */
+  function moveList(f){
+    var bits = [];
+    if (f.steps) bits.push(f.steps + (f.steps === 1 ? " step" : " steps"));
+    if (f.thirds) bits.push(f.thirds + (f.thirds === 1 ? " third" : " thirds"));
+    if (f.leaps) bits.push(f.leaps + (f.leaps === 1 ? " leap" : " leaps"));
+    if (f.repeats) bits.push(f.repeats + " held");
+    var last = bits.pop();
+    return bits.length ? bits.join(", ") + " and " + last : last;
+  }
+  var COUNTED = ["no", "one", "two", "three", "four", "five", "six", "seven", "eight"];
+  function counted(n){ return COUNTED[n] || String(n); }
+  function readLines(rows){
+    var out = [], every = rows.map(function(_, k){ return k; });
+    for (var v = MAX_VOICES - 1; v >= 0; v--){          /* top down, as the ear takes them */
+      var f = lineFacts(rows, v), said = [];
+      var inner = (v === 1 || v === 2), name = VOICES[v];
+      var span = intervalName(f.low, f.high) || (f.range + 1) + "th";
+      var biggest = f.widest ? melodic(f.notes[f.widestAt - 1], f.notes[f.widestAt]).name : "";
+      var note = function(text, strong){
+        if (said.length < LINE_MAX)
+          said.push({ level:"note", text:text, strong:strong || null,
+                      hear:{ line:every, voice:v } });
+      };
+
+      /* standing still is the plainest thing there is to say about a line,
+         whichever voice it is */
+      if (!f.range)
+        note(name + " never moves: " + f.low.name + " for all " + rows.length +
+             " chords \u2014 a part in name only.");
+      else if (f.longestRun >= 3)
+        note(name + " repeats " + f.notes[f.runAt].name + " " + counted(f.longestRun) +
+             " times running \u2014 " + (v === 0
+               ? "a held bass stops the harmony moving underneath it."
+               : "holding a note is the smoothest thing a voice can do, but three in a row " +
+                 "is a voice standing still."));
+
+      if (inner){
+        if (f.leaps && f.leaps * 2 >= f.moves)
+          note(name + " leaps in " + f.leaps + " of its " + f.moves + " moves, the widest " +
+               withArticle(biggest) + " \u2014 an inner voice mostly steps; the leaping is the " +
+               "outer voices' work.", biggest);
+        else if (!f.leaps)
+          note(name + " never leaps \u2014 " + moveList(f) + " across the whole progression. " +
+               "That is what an inner voice is for.");
+        if (f.range >= 8)
+          note(name + " covers " + withArticle(span) + ", " + f.low.name + " to " + f.high.name +
+               " \u2014 a long way for an inner voice, which fills the space between the outer " +
+               "two rather than travelling through it.", span);
+      } else if (v === MAX_VOICES - 1){
+        if (f.range <= 2)
+          note("Soprano never leaves " + withArticle(span) + ", " + f.low.name + " to " +
+               f.high.name + " \u2014 the top voice is the one anybody actually hears.", span);
+        else if (f.peaks === 1 && f.range >= 3 && f.highAt > 0 && f.highAt < f.notes.length - 1)
+          note("Soprano climbs to " + f.high.name + " at chord " + (f.highAt + 1) +
+               " and comes away from it: one high point, reached and left. That is what gives " +
+               "a line its shape.");
+        if (f.leaps > f.steps)
+          note("Soprano leaps more often than it steps \u2014 " + moveList(f) + " \u2014 and a " +
+               "melody is mostly steps, with the leaps kept for where the shape wants one.");
+      }
+
+      /* a line that hardly moves has already been described; saying it went
+         one way as well is a distinction without a difference */
+      if (f.range >= 3 && !f.turns && f.moves >= 3)
+        note(name + " goes one way from first chord to last, " + f.notes[0].name + " to " +
+             f.notes[f.notes.length - 1].name + " \u2014 a line usually turns at least once.");
+
+      if (said.length) out.push({ voice:v, items:said });
+    }
+    return out;
   }
 
   /* ---------- reporting it ------------------------------------------------ */
@@ -2345,6 +2475,55 @@
   function notesKey(){
     return state.notes.map(function(n){ return n.slot + ":" + n.step; }).sort().join(",") +
            "|" + state.chords.join("") + "|" + state.tonic + state.mode;
+  }
+  function itemRow(item){
+    var row = document.createElement("li");
+    row.className = item.level;
+    if (item.hear){
+      var ear = document.createElement("button");
+      ear.type = "button";
+      ear.className = "hear";
+      ear.title = item.hear.move != null
+        ? "Hear these voices move, then hear it without the fault"
+        : item.hear.line ? "Hear this voice on its own, through these chords"
+        : "Hear the chord, then these two voices";
+      ear.setAttribute("aria-label", ear.title);
+      ear.textContent = "\u25B6";
+      ear.addEventListener("click", function(){ hearFinding(item.hear); });
+      row.appendChild(ear);
+      row.className += " hearable";
+    }
+    /* appended, never assigned: textContent would throw away the button
+       that has just been put in front of it */
+    var cut = item.strong ? item.text.indexOf(item.strong) : -1;
+    if (cut < 0) row.appendChild(document.createTextNode(item.text));
+    else {
+      var strong = document.createElement("b");
+      strong.textContent = item.strong;
+      row.appendChild(document.createTextNode(item.text.slice(0, cut)));
+      row.appendChild(strong);
+      row.appendChild(document.createTextNode(item.text.slice(cut + item.strong.length)));
+    }
+    return row;
+  }
+  /* the second list under the checklist: one block a voice, and no heading
+     at all where there was nothing worth saying about any of them */
+  function lineRows(){
+    var head = document.getElementById("lineshead"), list = document.getElementById("lines");
+    var has = report && report.lines && report.lines.length;
+    head.hidden = !has; list.hidden = !has;
+    list.innerHTML = "";
+    if (!has) return;
+    report.lines.forEach(function(b){
+      var li = document.createElement("li");
+      li.className = "block";
+      var label = document.createElement("b");
+      label.textContent = VOICES[b.voice];
+      var ul = document.createElement("ul");
+      b.items.forEach(function(item){ ul.appendChild(itemRow(item)); });
+      li.appendChild(label); li.appendChild(ul);
+      list.appendChild(li);
+    });
   }
   function renderReport(){
     var box = document.getElementById("results");
@@ -2375,37 +2554,11 @@
         label.appendChild(sub);
       }
       var ul = document.createElement("ul");
-      b.items.forEach(function(item){
-        var row = document.createElement("li");
-        row.className = item.level;
-        if (item.hear){
-          var ear = document.createElement("button");
-          ear.type = "button";
-          ear.className = "hear";
-          ear.title = item.hear.move != null
-            ? "Hear these voices move, then hear it without the fault"
-            : item.hear.line ? "Hear this voice through these chords"
-            : "Hear the chord, then these two voices";
-          ear.setAttribute("aria-label", ear.title);
-          ear.textContent = "\u25B6";
-          ear.addEventListener("click", function(){ hearFinding(item.hear); });
-          row.appendChild(ear);
-          row.className += " hearable";
-        }
-        var cut = item.strong ? item.text.indexOf(item.strong) : -1;
-        if (cut < 0) row.textContent = item.text;
-        else {
-          var strong = document.createElement("b");
-          strong.textContent = item.strong;
-          row.appendChild(document.createTextNode(item.text.slice(0, cut)));
-          row.appendChild(strong);
-          row.appendChild(document.createTextNode(item.text.slice(cut + item.strong.length)));
-        }
-        ul.appendChild(row);
-      });
+      b.items.forEach(function(item){ ul.appendChild(itemRow(item)); });
       li.appendChild(label); li.appendChild(ul);
       list.appendChild(li);
     });
+    lineRows();
     if (!list.children.length){
       var li2 = document.createElement("li");
       li2.className = "block";
@@ -3094,7 +3247,7 @@
         if (!row) return;
         var one = h.voice == null ? bassOf(row) : row[h.voice];
         steps.push({ slot:h.line[k], notes:[{ slot:h.line[k], step:one.step }],
-                     ms: k === h.line.length - 1 ? 1200 : 800 });
+                     ms: k === h.line.length - 1 ? 1150 : (h.line.length > 3 ? 620 : 800) });
       }
     } else if (h.chord != null){
       if (!rows[h.chord]) return;
@@ -3263,7 +3416,10 @@
     state.notes = state.notes.filter(function(n){ return going.indexOf(n) === -1; })
                              .concat(answer.filter(function(n){ return !n.given; }));
     driftAway(going);
-    /* and then it is checked, like anything else written here */
+    /* and then it is checked, like anything else written here. The notes
+       have only this moment arrived, so they are read into voices first;
+       everywhere else a render has already done that. */
+    updateVoices();
     var depth = writtenDepth();
     if (depth >= 1){
       report = runChecks(depth);
@@ -3329,10 +3485,20 @@
       out.push("");
       out.push("Not checked in the app yet.");
     }
+    if (report && report.lines && report.lines.length){
+      out.push("");
+      out.push("And what it said about the lines:");
+      report.lines.forEach(function(b){
+        b.items.forEach(function(item){
+          out.push("  \u2022 " + item.text);
+        });
+      });
+    }
     out.push("");
     out.push("What is the voice leading like? Doubling, spacing, crossing and overlap, " +
              "the leading tone, any seventh's resolution, the use made of any six-four, and " +
-             "parallel fifths, octaves or unisons.");
+             "parallel fifths, octaves or unisons. And are these four singable lines \u2014 " +
+             "does each one go somewhere, and is the soprano a tune?");
     return out.join("\n");
   }
   function flashExport(word){
