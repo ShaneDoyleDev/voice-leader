@@ -1625,6 +1625,7 @@
            : "Write the next chord, then check again.")
       : wants ? wants
       : "Everything written so far. Nothing to fix and the next chord opens.";
+    remember();
   }
 
   var chips = document.getElementById("chips");
@@ -2649,7 +2650,10 @@
      takes effect from the following chord rather than waiting for the end. */
   var tempo = document.getElementById("tempo"), tempoOut = document.getElementById("tempoval");
   function chordMs(){ return Math.round(60000 / (+tempo.value || 60)); }
-  tempo.addEventListener("input", function(){ tempoOut.textContent = tempo.value + " bpm"; });
+  tempo.addEventListener("input", function(){
+    tempoOut.textContent = tempo.value + " bpm";
+    remember();
+  });
   var playTimer = null, ringTimer = null, playingSlot = null;
   function stopPlayback(){
     if (hearTimer){ clearTimeout(hearTimer); hearTimer = null; }
@@ -3100,6 +3104,7 @@
       ? "Pick at least two chords."
       : state.chords.length + " chords — " + state.chords.map(numeralOf).join(" – ") +
         " in " + keyName() + ".";
+    remember();
   }
 
   document.getElementById("btn-seventh").addEventListener("click", function(){
@@ -3529,10 +3534,109 @@
     copyTheOldWay(text);
   });
 
+  /* ---------- picking the session up again --------------------------------
+     A refresh, a closed tab, a phone that decided on its own to reload the
+     page: none of them should cost you the chord you were in the middle of.
+     So the working state is kept — the key and the progression, every note
+     with a drill's given ones still marked as given, the ticks above the
+     staff, how far the frontier has opened, the tempo — and read back on the
+     next visit.
+
+     The checklist is not kept. It is a reading of the staff rather than a
+     part of it, and it comes back the moment you press Proceed; storing a
+     verdict would only risk showing you one that no longer describes what is
+     written.
+
+     Storage can fail — a private window, a browser with site data turned off,
+     a disk with nothing left on it — and the app has to work anyway, so every
+     read and write is wrapped and a failure simply means starting fresh. */
+  var KEEP = "voice-leader.session", KEEP_V = 1;
+  var kept = null, keepTimer = null;
+  function remember(){
+    if (keepTimer) return;                 /* one write a moment, however busy */
+    keepTimer = setTimeout(function(){
+      keepTimer = null;
+      var box;
+      try {
+        box = JSON.stringify({
+          v:KEEP_V, mode:state.mode, tonic:state.tonic, chords:state.chords,
+          drill:state.drill, live:state.live, marks:state.marks, open:open,
+          staged:!stage.hidden, sevenths:sevenths, tempo:+tempo.value,
+          notes:state.notes.map(function(n){
+            return { slot:n.slot, step:n.step, staff:n.staff, given:!!n.given };
+          })
+        });
+      } catch (e) { return; }
+      if (box === kept) return;            /* an animating staff says the same thing */
+      kept = box;
+      try { localStorage.setItem(KEEP, box); } catch (e) { /* nothing to be done */ }
+    }, 400);
+  }
+  /* What comes back is treated as a stranger's. A session that cannot answer
+     for itself in every particular is dropped whole rather than picked over:
+     half of one restored is worse than none, because the difference would
+     turn up later as a staff the checker cannot read. */
+  function sane(was){
+    if (!was || was.v !== KEEP_V || !KEYS[was.mode]) return false;
+    if (KEYS[was.mode].map(function(k){ return k[0]; }).indexOf(was.tonic) < 0) return false;
+    if (!Array.isArray(was.chords) || was.chords.length > MAX_CHORDS) return false;
+    if (!was.chords.every(function(c){
+          return c === Math.floor(c) && c >= 1 && c <= DEGREES.length * 2; })) return false;
+    if (was.drill != null && was.drill !== "bass" && was.drill !== "soprano") return false;
+    if (was.live != null && typeof was.live !== "string") return false;
+    if (!Array.isArray(was.notes)) return false;
+    var perSlot = {}, perPlace = {}, i, n, at;
+    for (i = 0; i < was.notes.length; i++){
+      n = was.notes[i];
+      if (!n || n.slot !== Math.floor(n.slot) || n.slot < 0 || n.slot >= was.chords.length)
+        return false;
+      if (n.step !== Math.floor(n.step) || n.step < STAVES.bass.lowest ||
+          n.step > STAVES.treble.highest) return false;
+      if (n.staff !== "bass" && n.staff !== "treble") return false;
+      perSlot[n.slot] = (perSlot[n.slot] || 0) + 1;
+      if (perSlot[n.slot] > MAX_VOICES) return false;
+      at = n.slot + ":" + n.step;
+      perPlace[at] = (perPlace[at] || 0) + 1;
+      if (perPlace[at] > MAX_AT) return false;
+    }
+    if (was.marks != null){
+      if (typeof was.marks !== "object") return false;
+      for (at in was.marks)
+        if (!/^\d+:\d$/.test(at) || [0, 1, 2].indexOf(was.marks[at]) < 0) return false;
+    }
+    return true;
+  }
+  /* true where the staff was open when you left it, so it can be opened again */
+  function recall(){
+    var raw, was;
+    try { raw = localStorage.getItem(KEEP); } catch (e) { return false; }
+    if (!raw) return false;
+    try { was = JSON.parse(raw); } catch (e) { return false; }
+    if (!sane(was)) return false;
+    state.mode = was.mode;
+    state.tonic = was.tonic;
+    state.chords = was.chords.slice();
+    state.drill = was.drill || null;
+    state.live = was.live || "";
+    state.marks = was.marks || {};
+    state.notes = was.notes.map(function(n){
+      var note = { slot:n.slot, step:n.step, staff:n.staff };
+      if (n.given) note.given = true;
+      return note;
+    });
+    open = Math.max(0, Math.min(was.open | 0, state.chords.length - 1));
+    sevenths = !!was.sevenths;
+    if (was.tempo >= +tempo.min && was.tempo <= +tempo.max){
+      tempo.value = was.tempo;
+      tempoOut.textContent = tempo.value + " bpm";
+    }
+    return !!was.staged && state.chords.length >= 2;
+  }
+
   /* ---------- toolbar --------------------------------------------------------- */
   document.getElementById("btn-clear").addEventListener("click", function(){ clearNotes(); });
 
-  drawSetup();
+  if (recall()) enterStage(); else drawSetup();
 })();
 </script>
 </body>
