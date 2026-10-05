@@ -470,6 +470,8 @@
       <ul class="findings" id="findings"></ul>
       <h2 id="lineshead" hidden>Lines</h2>
       <ul class="findings" id="lines" hidden></ul>
+      <h2 id="stylehead" hidden>Style</h2>
+      <ul class="findings" id="style" hidden></ul>
     </section>
 
     <div class="readout" style="margin-top:20px">
@@ -2353,6 +2355,7 @@
       else full.push(line);
     }
     report.lines = whole ? readLines(full) : [];
+    report.style = depth >= 2 ? readStyle(depth) : [];
     return report;
   }
 
@@ -2471,6 +2474,59 @@
     return out;
   }
 
+  /* ---------- keyboard or choral ------------------------------------------
+     The same four parts can be written for two different pairs of hands. In
+     keyboard style the three upper voices are one right-hand chord over a
+     left-hand bass, so soprano to tenor has to fit inside an octave: close
+     position. In choral style the voices are a choir's, and open position —
+     soprano more than an octave over the tenor — is as ordinary as close.
+
+     What tells them apart is spacing and nothing else, which is why this can
+     be said without a word about range: how high or low a voice sits is not
+     read here and not reported. Close position is both keyboard style and
+     one kind of choral writing, so a progression that is close throughout is
+     reported as keyboard style and the report says it could equally be
+     choral; only open chords make it unmistakably the other.
+
+     Like the lines, this is an observation rather than a mark: it counts
+     nothing in the verdict and holds nothing shut. */
+  function chordList(slots){
+    var nums = slots.map(function(k){ return k + 1; });
+    var last = nums.pop();
+    return (nums.length ? "chords " + nums.join(", ") + " and " : "chord ") + last;
+  }
+  function readStyle(depth){
+    var close = [], open = [], k, v;
+    for (k = 0; k < depth; k++){
+      v = voicesOf(k);
+      if (v.length !== MAX_VOICES) continue;            /* three notes have no tenor to measure to */
+      if (v[3].midi - v[1].midi <= 12) close.push(k); else open.push(k);
+    }
+    var read = close.length + open.length;
+    if (read < 2) return [];
+    var text, strong = null;
+    if (!open.length){
+      text = "Keyboard style \u2014 in " + (read === 2 ? "both" : "all " + read) + " chords the " +
+             "soprano, alto and tenor sit within an octave, so one right hand could play them " +
+             "over a left-hand bass. Close position like this is equally good choral writing; " +
+             "the spacing cannot say which of the two you meant.";
+      strong = "Keyboard style";
+    } else if (!close.length){
+      text = "Choral style \u2014 in " + (read === 2 ? "both" : "all " + read) + " chords the " +
+             "soprano is more than an octave above the tenor: open position. That is wider than " +
+             "one hand spans, so this could not be played as keyboard style; it is how the " +
+             "voices lie across a choir.";
+      strong = "Choral style";
+    } else {
+      text = "Mixed spacing \u2014 close in " + chordList(close) + ", open in " + chordList(open) +
+             ". Choral writing moves between the two freely, and often has to for the lines to " +
+             "stay smooth; it is not keyboard style, since no one hand could play " +
+             chordList(open) + ".";
+      strong = "Mixed spacing";
+    }
+    return [{ label:"Spacing", items:[{ level:"note", text:text, strong:strong }] }];
+  }
+
   /* ---------- reporting it ------------------------------------------------ */
   var report = null, reportKey = "";
   function notesKey(){
@@ -2509,22 +2565,26 @@
   }
   /* the second list under the checklist: one block a voice, and no heading
      at all where there was nothing worth saying about any of them */
-  function lineRows(){
-    var head = document.getElementById("lineshead"), list = document.getElementById("lines");
-    var has = report && report.lines && report.lines.length;
+  function noteList(headId, listId, blocks, nameOf){
+    var head = document.getElementById(headId), list = document.getElementById(listId);
+    var has = !!(blocks && blocks.length);
     head.hidden = !has; list.hidden = !has;
     list.innerHTML = "";
     if (!has) return;
-    report.lines.forEach(function(b){
+    blocks.forEach(function(b){
       var li = document.createElement("li");
       li.className = "block";
       var label = document.createElement("b");
-      label.textContent = VOICES[b.voice];
+      label.textContent = nameOf(b);
       var ul = document.createElement("ul");
       b.items.forEach(function(item){ ul.appendChild(itemRow(item)); });
       li.appendChild(label); li.appendChild(ul);
       list.appendChild(li);
     });
+  }
+  function lineRows(){
+    noteList("lineshead", "lines", report && report.lines, function(b){ return VOICES[b.voice]; });
+    noteList("stylehead", "style", report && report.style, function(b){ return b.label; });
   }
   function renderReport(){
     var box = document.getElementById("results");
@@ -3497,6 +3557,13 @@
         b.items.forEach(function(item){
           out.push("  \u2022 " + item.text);
         });
+      });
+    }
+    if (report && report.style && report.style.length){
+      out.push("");
+      out.push("And how it reads as keyboard or choral writing:");
+      report.style.forEach(function(b){
+        b.items.forEach(function(item){ out.push("  \u2022 " + item.text); });
       });
     }
     out.push("");
