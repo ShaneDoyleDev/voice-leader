@@ -2475,54 +2475,76 @@
   }
 
   /* ---------- keyboard or choral ------------------------------------------
-     The same four parts can be written for two different pairs of hands. In
+     The same four parts can be written for two different sets of hands. In
      keyboard style the three upper voices are one right-hand chord over a
-     left-hand bass, so soprano to tenor has to fit inside an octave: close
-     position. In choral style the voices are a choir's, and open position —
-     soprano more than an octave over the tenor — is as ordinary as close.
+     left-hand bass, so they are as compact as the chord allows: no tone of
+     the chord could be slipped in between soprano and alto, or between alto
+     and tenor. The gap from tenor down to the bass is free. In choral style
+     the voices are a choir's, and open position — the soprano more than an
+     octave over the tenor — is as ordinary as close.
 
-     What tells them apart is spacing and nothing else, which is why this can
-     be said without a word about range: how high or low a voice sits is not
-     read here and not reported. Close position is both keyboard style and
-     one kind of choral writing, so a progression that is close throughout is
-     reported as keyboard style and the report says it could equally be
-     choral; only open chords make it unmistakably the other.
+     So each chord is one of three things. Tight: nothing could fit between
+     the upper voices. Close but loose: still within an octave, so not open,
+     but a chord tone has been stepped over somewhere. Open: wider than an
+     octave. Only a progression that is tight throughout is keyboard style.
 
-     Like the lines, this is an observation rather than a mark: it counts
-     nothing in the verdict and holds nothing shut. */
+     What tells them apart is spacing and nothing else, so none of this says
+     a word about range: how high or low a voice sits is not read here and
+     not reported. Like the lines, it is an observation rather than a mark;
+     it counts nothing in the verdict and holds nothing shut. */
   function chordList(slots){
     var nums = slots.map(function(k){ return k + 1; });
     var last = nums.pop();
     return (nums.length ? "chords " + nums.join(", ") + " and " : "chord ") + last;
   }
+  /* a tone of the chord strictly between two of its own upper voices */
+  function skipsATone(lo, hi, tones){
+    for (var st = lo.step + 1; st < hi.step; st++)
+      if (tones.indexOf(st % 7) > -1) return true;
+    return false;
+  }
   function readStyle(depth){
-    var close = [], open = [], k, v;
+    var tight = [], loose = [], open = [], k, v, tones;
     for (k = 0; k < depth; k++){
       v = voicesOf(k);
       if (v.length !== MAX_VOICES) continue;            /* three notes have no tenor to measure to */
-      if (v[3].midi - v[1].midi <= 12) close.push(k); else open.push(k);
+      tones = chordLetters(state.chords[k]);
+      if (v[3].midi - v[1].midi > 12) open.push(k);
+      else if (skipsATone(v[1], v[2], tones) || skipsATone(v[2], v[3], tones)) loose.push(k);
+      else tight.push(k);
     }
-    var read = close.length + open.length;
+    var read = tight.length + loose.length + open.length;
     if (read < 2) return [];
-    var text, strong = null;
-    if (!open.length){
-      text = "Keyboard style \u2014 in " + (read === 2 ? "both" : "all " + read) + " chords the " +
-             "soprano, alto and tenor sit within an octave, so one right hand could play them " +
-             "over a left-hand bass. Close position like this is equally good choral writing; " +
-             "the spacing cannot say which of the two you meant.";
+    var every = read === 2 ? "both" : "all " + read, text, strong;
+    if (tight.length === read){
       strong = "Keyboard style";
-    } else if (!close.length){
-      text = "Choral style \u2014 in " + (read === 2 ? "both" : "all " + read) + " chords the " +
-             "soprano is more than an octave above the tenor: open position. That is wider than " +
-             "one hand spans, so this could not be played as keyboard style; it is how the " +
-             "voices lie across a choir.";
+      text = "Keyboard style \u2014 in " + every + " chords the soprano, alto and tenor are as " +
+             "close as the chord allows, with no chord tone that could fit between them, so one " +
+             "right hand holds them over a left-hand bass. Tight spacing like this is equally " +
+             "good choral writing; it cannot say which of the two you meant.";
+    } else if (!open.length && !tight.length){
+      strong = "Close, but not tight";
+      text = "Close, but not tight \u2014 in " + every + " chords the upper voices lie within an " +
+             "octave but step over a chord tone somewhere between them. That is close position, " +
+             "not open, but keyboard style wants the three as compact as the chord allows.";
+    } else if (!open.length){
+      strong = "Close, but not tight";
+      text = "Close, but not tight in " + chordList(loose) + " \u2014 the upper voices lie " +
+             "within an octave but step over a chord tone somewhere between them, where " +
+             chordList(tight) + (tight.length === 1 ? " is" : " are") + " as compact as the " +
+             "chord allows. Keyboard style wants every chord that compact.";
+    } else if (!tight.length && !loose.length){
       strong = "Choral style";
+      text = "Choral style \u2014 in " + every + " chords the soprano is more than an octave " +
+             "above the tenor: open position. That is wider than one hand spans, so this " +
+             "could not be played as keyboard style; it is how the voices lie across a choir.";
     } else {
-      text = "Mixed spacing \u2014 close in " + chordList(close) + ", open in " + chordList(open) +
-             ". Choral writing moves between the two freely, and often has to for the lines to " +
-             "stay smooth; it is not keyboard style, since no one hand could play " +
-             chordList(open) + ".";
+      var rest = tight.concat(loose).sort(function(a, b){ return a - b; });
       strong = "Mixed spacing";
+      text = "Mixed spacing \u2014 open in " + chordList(open) + ", close in " + chordList(rest) +
+             ". Choral writing moves between the two freely, and often has to for the lines " +
+             "to stay smooth; it is not keyboard style, since no one hand could play " +
+             chordList(open) + ".";
     }
     return [{ label:"Spacing", items:[{ level:"note", text:text, strong:strong }] }];
   }
