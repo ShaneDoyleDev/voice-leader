@@ -156,6 +156,9 @@
     font-family:"Spectral", Georgia, serif; font-size:19px; letter-spacing:.03em;
   }
   .seq .slot small{font-size:10px;color:var(--ink-soft);font-variant-numeric:tabular-nums}
+  .seq .slot small.fn{                   /* what the chord is doing in the key */
+    margin-top:2px; font-style:italic; font-size:9.5px; letter-spacing:.03em;
+  }
   .seq .slot:hover{border-color:var(--accent)}
   .seq .none{
     align-self:center; margin:0 4px;
@@ -404,6 +407,8 @@
       <p class="keyline" id="progline"></p>
       <div class="row">
         <button type="button" id="btn-seventh" aria-pressed="false">Sevenths</button>
+        <button type="button" id="btn-generate"
+                title="Write a progression that moves tonic, predominant, dominant, tonic">Generate progression</button>
         <span class="spacer"></span>
         <button type="button" class="ghost" id="undo">Undo</button>
         <button type="button" class="ghost" id="clearprog">Clear</button>
@@ -699,6 +704,83 @@
     out.push(1);
     return out;
   }
+  /* ---------- progressions that mean something ----------------------------
+     Functional harmony sorts the seven chords of a key by what they do rather
+     than what they are. Tonic chords are home and rest there: I, and vi and
+     iii which stand in for it. Predominant chords lean away from home and
+     want somewhere to go: ii and IV. Dominant chords make the tension that
+     home resolves: V, and vii\u00B0 which is V without its root. The ordinary
+     journey is tonic, predominant, dominant, tonic, and the one move that is
+     not made is back \u2014 a dominant going to a predominant, V to IV, undoes
+     the very thing it has just done. (V to vi, the deceptive cadence, is the
+     exception that is the point: the dominant is allowed to resolve to a
+     tonic that is not the tonic.)
+
+     So a progression is a walk over those moves, weighted by how often each
+     is really made, that has to open on the tonic and close on a dominant
+     and the tonic \u2014 an authentic cadence. Walks that break the grammar are
+     thrown away and drawn again. */
+  var FUNCTION = { 1:"tonic", 2:"predominant", 3:"tonic", 4:"predominant",
+                   5:"dominant", 6:"tonic", 7:"dominant" };
+  var FLOW = {
+    1:{ 2:3, 3:0.7, 4:3, 5:1.5, 6:2 },
+    2:{ 5:6, 7:0.8 },
+    3:{ 2:1, 4:2, 6:3 },
+    4:{ 5:5, 2:1.5, 1:1.5, 7:0.5 },
+    5:{ 1:7, 6:1.2 },
+    6:{ 2:3, 4:3, 5:0.6 },
+    7:{ 1:6, 3:0.8 }
+  };
+  var LENGTHS = [4, 5, 5, 5, 6, 6, 6, 7, 7, 8, 8];     /* 5 and 6 likeliest, 4 and 8 the edges */
+  function flowFrom(degree){
+    var opts = FLOW[degree], out = [];
+    Object.keys(opts).forEach(function(k){
+      var w = opts[k];
+      if (state.mode === "minor" && +k === 2) w *= 0.5;    /* ii\u00B0 is the lesser predominant in minor */
+      out.push({ degree:+k, w:w });
+    });
+    return out;
+  }
+  function drawFrom(options){
+    var total = options.reduce(function(t, o){ return t + o.w; }, 0), r = Math.random() * total, i;
+    for (i = 0; i < options.length; i++){ r -= options[i].w; if (r <= 0) return options[i].degree; }
+    return options[options.length - 1].degree;
+  }
+  function wellFormed(chords){
+    var seen = {}, i;
+    for (i = 0; i < chords.length; i++){
+      if (i && chords[i] === chords[i - 1]) return false;        /* no chord twice running */
+      seen[chords[i]] = (seen[chords[i]] || 0) + 1;
+    }
+    if (seen[1] > 3 || seen[5] > 2 || (seen[7] || 0) > 1) return false;
+    for (i in seen) if (+i !== 1 && seen[i] > 2) return false;
+    /* a four-chord loop that only ever shuttles between two chords says nothing */
+    return Object.keys(seen).length >= Math.min(chords.length - 1, 4);
+  }
+  function makeFunctional(withSevenths){
+    var tries, length, out, i, dominant;
+    for (tries = 0; tries < 400; tries++){
+      length = LENGTHS[Math.floor(Math.random() * LENGTHS.length)];
+      out = [1];
+      for (i = 1; i < length - 2; i++) out.push(drawFrom(flowFrom(out[i - 1])));
+      dominant = Math.random() < 0.82 ? 5 : 7;
+      if (!FLOW[out[out.length - 1]][dominant]) continue;         /* it has to be able to lead there */
+      out.push(dominant, 1);
+      if (!wellFormed(out)) continue;
+      return withSevenths ? out.map(seventhOn) : out;
+    }
+    return [1, 4, 5, 1];
+  }
+  /* A seventh is a colour put on a chord that wants one. The dominant always
+     has it \u2014 V\u2077 is the sound of the cadence \u2014 and so does the chord on the
+     leading tone; the predominants and the tonic substitutes take it more
+     often than not; the tonic itself stays a plain triad, being the chord
+     nothing is left owing. */
+  var SEVENTH_ODDS = { 1:0, 2:0.7, 3:0.4, 4:0.3, 5:1, 6:0.4, 7:1 };
+  function seventhOn(degree){
+    return degree + (Math.random() < SEVENTH_ODDS[degree] ? 7 : 0);
+  }
+
   function makeKey(){
     var mode = Math.random() < 0.6 ? "major" : "minor";
     var plain = KEYS[mode].filter(function(k){ return Math.abs(k[1]) <= 4; });
@@ -3160,7 +3242,8 @@
       b.type = "button";
       b.className = "slot";
       b.title = "Remove this chord";
-      b.innerHTML = "<span>" + numeralOf(degree) + "</span><small>" + spell(degree) + "</small>";
+      b.innerHTML = "<span>" + numeralOf(degree) + "</span><small>" + spell(degree) + "</small>" +
+                    "<small class=\"fn\">" + FUNCTION[deg(degree)] + "</small>";
       b.addEventListener("click", function(){ state.chords.splice(i,1); drawSetup(); });
       seq.appendChild(b);
     });
@@ -3191,6 +3274,10 @@
 
   document.getElementById("btn-seventh").addEventListener("click", function(){
     sevenths = !sevenths;
+    drawSetup();
+  });
+  document.getElementById("btn-generate").addEventListener("click", function(){
+    state.chords = makeFunctional(sevenths);
     drawSetup();
   });
   document.getElementById("undo").addEventListener("click", function(){ state.chords.pop(); drawSetup(); });
