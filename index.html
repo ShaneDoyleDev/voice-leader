@@ -577,6 +577,12 @@
   }
   function tonicLetter(){ return LETTERS.indexOf(state.tonic.charAt(0)); }
   function leadingLetter(){ return (tonicLetter() + 6) % 7; }
+  /* the leading tone as a tendency tone: in major it is the seventh degree
+     wherever it turns up, in minor only where the chord raises it — the
+     natural seventh of III is the subtonic, and leans nowhere in particular */
+  function isLeadingTone(chord, letter){
+    return letter === leadingLetter() && (state.mode === "major" || raisesLeadingTone(chord));
+  }
   /* the chords that borrow the raised leading tone in minor: V and vii-dim.
      Everything else stays diatonic to the natural minor scale, so III keeps
      its lowered seventh and reads as a major triad.                       */
@@ -2189,12 +2195,26 @@
         }
       });
 
-      /* Doubling. A doubled third is the weaker choice in a major triad —
-         it is the note that gives the chord its character, and two of it
-         thickens what should stay clear. A minor triad is the other way
-         about: doubling its third is ordinary, and often the best answer, so
-         it passes without comment. Three copies still draw one, in any
-         quality, since that is a chord missing something else. */
+      /* Doubling. What may be doubled depends on what the chord is and what
+         is lowest in it, and on one thing that is true of every chord: a
+         tendency tone is never doubled. The leading tone leans up to the
+         tonic, the chordal seventh leans down, and the fifth of a diminished
+         triad leans down too, so two copies of any of them are two voices
+         owing the same step, and moving together they make parallel octaves.
+         Everything else is a matter of taste, and taste differs by chord.
+
+         A doubled third is the weaker choice in a major triad in root
+         position — it is the note that gives the chord its character, and
+         two of it thickens what should stay clear. A minor triad is the other
+         way about: doubling its third is ordinary, so it passes. In a first
+         inversion the third is the bass, and doubling the bass is easy and
+         sound; the only third that cannot be doubled there is the leading
+         tone, which has a line of its own below. A diminished triad is the
+         exception the other way about: its root is the leading tone and its
+         fifth is a tendency tone, which leaves the third as the one tone that
+         can take a second voice, and vii\u00B06 is how the chord is usually
+         written. Three copies of anything draw a flag, in any quality, since
+         that is a chord missing something else. */
       tones.forEach(function(l, idx){
         if (!(counts[l] > 1)) return;
         var what = (counts[l] > 2 ? "Three copies of the " : "Doubles the ") +
@@ -2203,38 +2223,55 @@
           add("error", what + " \u2014 a seventh is a dissonance and wants one voice; " +
               "both copies would have to fall by step.", "seventh");
         }
-        /* A diminished chord is the exception the other way about. Its root
-           is the leading tone and its fifth is the interval the chord is
-           named for, so the third is the one tone left that can take a
-           second voice — and vii°6, with that third in the bass, is how the
-           chord is usually written. */
+        /* the doubled leading tone draws its own line just below; saying
+           "doubles the root" cheerfully here reads as a contradiction */
+        else if (isLeadingTone(degree, l)) return;
+        else if (idx === 2 && quality(degree) === "dim")
+          add("caution", what + " \u2014 the diminished fifth is a tendency tone that wants to " +
+              "fall by step, so two copies owe the same step and make parallel octaves if " +
+              "they move together; the third is the tone a diminished chord doubles.",
+              "diminished fifth");
         else if (idx === 1 && quality(degree) === "dim")
           add(counts[l] === 2 && !hasSeventh(degree) ? "ok" : "caution",
               what + (counts[l] === 2 && !hasSeventh(degree)
                 ? " \u2014 the tone to double in a diminished chord: its root is the leading " +
-                  "tone and its fifth is what the chord is named for, so the third is the one " +
-                  "left that can take a second voice."
+                  "tone and its fifth is a tendency tone, so the third is the one left that " +
+                  "can take a second voice."
                 : " \u2014 the third is the right tone to double in a diminished chord, but " +
                   "this many voices on it mean another tone has gone missing."));
         else if (idx === 1 && quality(degree) === "min" && counts[l] === 2)
           add("ok", what + " \u2014 ordinary in a minor triad.");
+        else if (idx === 1 && lowIdx === 1 && counts[l] === 2)
+          add("ok", what + " \u2014 fine in a first inversion, where the third is the bass.");
         else if (idx === 1)
-          add("caution", what + " \u2014 the weaker double" +
-              (lowIdx === 1 ? ", and it is the bass as well" : "") +
-              "; the root or the fifth is the safer choice.");
-        /* the doubled leading tone draws its own line just below; saying
-           "doubles the root" cheerfully above it reads as a contradiction */
-        else if (!(l === leadingLetter() && (deg(degree) === 5 || deg(degree) === 7)))
-          add("ok", what + ".");
+          add("caution", what + " \u2014 the weaker double; the root or the fifth is the " +
+              "safer choice.");
+        else add("ok", what + ".");
       });
 
-      /* the leading tone doubled, in a dominant or in the chord built on it.
-         A first inversion puts it in the bass, where doubling it is easy to
-         do by accident. */
-      if ((deg(degree) === 5 || deg(degree) === 7) && counts[leadingLetter()] > 1)
-        add("caution", "The leading tone " + letterText(degree, leadingLetter()) +
-            " is doubled \u2014 the one note normally left single: both copies want to rise, " +
-            "and two voices rising to the tonic is a parallel octave.");
+      /* the leading tone doubled, wherever the chord holds it: V, vii\u00B0 and
+         in major iii, where it is the fifth. A first inversion puts it in the
+         bass, where doubling it is easy to do by accident. The chord's own
+         seventh is spoken for above, so it is not said twice. */
+      var lt = leadingLetter();
+      if (counts[lt] > 1 && isLeadingTone(degree, lt) && tones.indexOf(lt) > -1 &&
+          tones.indexOf(lt) < 3)
+        add("caution", "The leading tone " + letterText(degree, lt) + " is doubled \u2014 the " +
+            "one note normally left single: it is the key's tendency tone, wanting to rise to " +
+            "the tonic, and two voices rising there make a parallel octave.");
+
+      /* A six-four is the one chord whose bass is meant to be doubled. The
+         bass is the fifth, and the fourth and sixth above it are the notes
+         that lean — in a cadential six-four they fall by step onto the
+         dominant's chord — so they want a voice each and the bass is the tone
+         left to take the second. A diminished triad has no six-four to speak
+         of: its fifth is the tendency tone, and is handled above. */
+      if (lowIdx === 2 && !hasSeventh(degree) && quality(degree) !== "dim" &&
+          v.length === MAX_VOICES && counts[tones[2]] < 2)
+        add("caution", "A six-four doubles its bass, " + letterText(degree, tones[2]) +
+            ", which here sounds once. The notes a fourth and a sixth above it are the ones " +
+            "that lean, so each wants one voice \u2014 the bass is the tone left to double.",
+            "doubles its bass");
 
       if (v.length < MAX_VOICES && v.length >= 3)
         add("ok", v.length + " voices \u2014 spacing, crossing and the parallel checks want a fourth.");
