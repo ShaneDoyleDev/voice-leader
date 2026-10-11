@@ -3413,17 +3413,37 @@
     wrap.focus({preventScroll:true});
   }
   /* A drill: a key, a progression and one voice already on the staff. */
-  function startDrill(kind){
+  /* An exercise is dealt only if it can be answered. A given line is written
+     to be melodic and to sit on the chords, and says nothing about the three
+     voices that have to go with it; some of the lines it can produce leave no
+     way through them at all, which the solver finds out only when it is asked
+     for an answer and has none to give. So the line is tried first, and
+     redealt where nothing that passes every rule can be written against it. */
+  var DEAL_CLEAN_TRIES = 12, DEAL_TRIES = 40;
+  function dealDrill(kind){
     var key = makeKey();
     state.mode = key.mode;
     state.tonic = key.tonic;
     state.chords = makeProgression();
-    state.marks = {};
     state.drill = kind;
     var line = kind === "bass" ? makeBass(state.chords) : makeSoprano(state.chords);
     state.notes = line.map(function(step, slot){
       return { slot:slot, step:step, staff:(kind === "bass" ? "bass" : "treble"), given:true };
     });
+  }
+  function startDrill(kind){
+    var tries = 0, ok;
+    state.marks = {};
+    do {
+      dealDrill(kind);
+      updateVoices();
+      tries++;
+      /* an exercise that has a clean answer is better than one that has not:
+         ask for that first, and settle for one that can be answered with a
+         caution or two only when a run of deals has not turned one up */
+      ok = cleanPath(0, tries <= DEAL_CLEAN_TRIES ? 0 : PATH_ALLOW[PATH_ALLOW.length - 1]);
+    } while (!ok && tries < DEAL_TRIES);
+    pathDead = null;
     enterStage();
   }
   /* a rotation or a window drag changes what the staff can have */
@@ -3622,15 +3642,19 @@
      nothing can follow any of them the smoothest is given anyway — the wall
      is then real, and worth meeting. */
   var SOLVE_LOOKAHEAD = 24, SOLVE_TRIES = 400;
-  function solveChord(slot, quick){
+  /* Every way of voicing the chord, smoothest first, with a given line kept
+     as the voice it was dealt as. A bass exercise's bass is the lowest note
+     of every chord and a melody's soprano the highest; let the search lay it
+     among the inner voices instead and the given bass stops being the bass —
+     another voice goes under it, the chord turns into an inversion nobody
+     asked for, and the exercise is no longer the one that was set. */
+  function givenAt(slot, from){
+    return from.filter(function(n){ return n.slot === slot && n.given; });
+  }
+  function candidatesFor(slot, from){
     var tones = chordLetters(state.chords[slot]);
-    var given = state.notes.filter(function(n){ return n.slot === slot && n.given; });
-    var kept = state.notes.filter(function(n){ return n.slot !== slot; });
-    var prev = slot > 0 ? notesIn(slot - 1) : [];
-    /* what the chords before this one are already being grumbled at for, so
-       that only this chord's own cautions count against a candidate */
-    var was = state.notes, cands = [], answer = null, fallback = null, grumbled = null;
-    var base = runChecks(slot).cautions, looked = 0, rep, follow, own, i;
+    var given = givenAt(slot, from);
+    var prev = slot > 0 ? notesIn(slot - 1) : [], cands = [];
     tonePitches(slot, 16, 28).forEach(function(b){
       /* voices may meet: a complete seventh chord resolving to its tonic can
          leave a voice nowhere to go but onto its neighbour's note, and a
@@ -3646,13 +3670,110 @@
     });
     cands.forEach(function(c){ c.cost = costOf(slot, c, prev, tones); });
     cands.sort(function(x, y){ return x.cost - y.cost; });
+    return cands.filter(function(c){
+      if (!given.length) return true;
+      return state.drill === "bass" ? c[0] === given[0].step
+           : state.drill === "soprano" ? c[3] === given[0].step
+           : given.every(function(n){ return c.indexOf(n.step) > -1; });
+    });
+  }
+  function trialOf(slot, c, from){
+    var given = givenAt(slot, from);
+    return c.map(function(step){
+      var mine = given.filter(function(n){ return n.step === step; })[0];
+      return mine || { slot:slot, step:step, staff: step >= 28 ? "treble" : "bass" };
+    });
+  }
+
+  /* One chord at a time is not enough to find an answer that is clean all
+     the way through. Looking a chord ahead catches the chord that cannot be
+     followed, but not the one that can be followed only into a corner two
+     chords on, and a fault met there is met when nothing before it can any
+     longer be changed. So the search first tries the rest of the exercise:
+     the smoothest voicing of every remaining chord, backing out the moment
+     one of them would draw an error or a caution, until a path is found that
+     is clean from here to the last chord. Its first chord is the answer.
+     It is given a budget, since an exercise that has no clean answer — the
+     given line can force one — would otherwise be searched for ever; and a
+     failure is remembered, so the next press does not pay for it again. */
+  var PATH_BUDGET = 500, PATH_WIDTH = 60, PATH_ALLOW = [0, 1, 2];
+  var pathDead = null;
+  function prefixSig(slot){
+    return state.notes.filter(function(n){ return n.slot < slot && !n.given; })
+      .map(function(n){ return n.slot + ":" + n.step; }).sort().join(",");
+  }
+  function exerciseSig(){
+    return state.mode + "|" + state.tonic + "|" + state.chords.join(",") + "|" +
+           (state.drill || "") + "|" +
+           state.notes.filter(function(n){ return n.given; })
+             .map(function(n){ return n.slot + ":" + n.step; }).sort().join(",");
+  }
+  function cleanPath(slot, allow){
+    var n = state.chords.length, was = state.notes, nodes = 0, chosen = [];
+    var head = was.filter(function(x){ return x.slot < slot; });
+    var base = runChecks(slot).cautions;
+    function lay(extra){
+      state.notes = head.concat.apply(head, chosen).concat(extra || []);
+      updateVoices();
+    }
+    function walk(k){
+      if (k === n) return true;
+      lay();
+      var tones = chordLetters(state.chords[k]);
+      var list = candidatesFor(k, was).slice(0, PATH_WIDTH), i, trial, rep;
+      for (i = 0; i < list.length; i++){
+        if (++nodes > PATH_BUDGET) return null;
+        /* a six-four on the last chord has nothing after it to resolve into */
+        if (k === n - 1 && !hasSeventh(state.chords[k]) && tones.indexOf(list[i][0] % 7) === 2)
+          continue;
+        trial = trialOf(k, list[i], was);
+        lay(trial);
+        rep = runChecks(k + 1);
+        if (rep.errors || rep.cautions > base + allow) continue;
+        chosen.push(trial);
+        var r = walk(k + 1);
+        if (r) return true;
+        chosen.pop();
+        if (r === null) return null;
+        lay();
+      }
+      return false;
+    }
+    var found = walk(slot) === true;
+    state.notes = was;
+    updateVoices();
+    return found ? chosen[0] : null;
+  }
+
+  function solveChord(slot, quick){
+    var tones = chordLetters(state.chords[slot]);
+    var given = state.notes.filter(function(n){ return n.slot === slot && n.given; });
+    var kept = state.notes.filter(function(n){ return n.slot !== slot; });
+    var prev = slot > 0 ? notesIn(slot - 1) : [];
+    if (!quick){
+      /* Clean all the way if that can be done; and where it cannot, with as
+         few cautions as it can be done with, one more at a time. What has
+         already failed for this exercise is not tried again. */
+      var sig = exerciseSig(), level = 0, path, a;
+      if (pathDead && pathDead.sig === sig && slot >= pathDead.slot &&
+          prefixSig(pathDead.slot) === pathDead.prefix) level = pathDead.level;
+      for (a = level; a < PATH_ALLOW.length; a++){
+        path = cleanPath(slot, PATH_ALLOW[a]);
+        if (path){
+          pathDead = { sig:sig, slot:slot, prefix:prefixSig(slot), level:a };
+          return path;
+        }
+      }
+      pathDead = { sig:sig, slot:slot, prefix:prefixSig(slot), level:PATH_ALLOW.length };
+    }
+    /* what the chords before this one are already being grumbled at for, so
+       that only this chord's own cautions count against a candidate */
+    var was = state.notes, answer = null, fallback = null, grumbled = null;
+    var base = runChecks(slot).cautions, looked = 0, rep, follow, own, i;
+    var cands = candidatesFor(slot, state.notes);
     for (i = 0; i < cands.length && i < SOLVE_TRIES; i++){
       var c = cands[i];
-      if (given.length && !given.every(function(n){ return c.indexOf(n.step) > -1; })) continue;
-      var trial = c.map(function(step){
-        var mine = given.filter(function(n){ return n.step === step; })[0];
-        return mine || { slot:slot, step:step, staff: step >= 28 ? "treble" : "bass" };
-      });
+      var trial = trialOf(slot, c, was);
       state.notes = kept.concat(trial);
       updateVoices();
       rep = runChecks(slot + 1);
