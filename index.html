@@ -3621,7 +3621,7 @@
      further ahead than one chord costs more than it is worth, and where
      nothing can follow any of them the smoothest is given anyway — the wall
      is then real, and worth meeting. */
-  var SOLVE_LOOKAHEAD = 8, SOLVE_TRIES = 400;
+  var SOLVE_LOOKAHEAD = 24, SOLVE_TRIES = 400;
   function solveChord(slot, quick){
     var tones = chordLetters(state.chords[slot]);
     var given = state.notes.filter(function(n){ return n.slot === slot && n.given; });
@@ -3630,7 +3630,7 @@
     /* what the chords before this one are already being grumbled at for, so
        that only this chord's own cautions count against a candidate */
     var was = state.notes, cands = [], answer = null, fallback = null, grumbled = null;
-    var base = runChecks(slot).cautions, clean = 0, rep, i;
+    var base = runChecks(slot).cautions, looked = 0, rep, follow, own, i;
     tonePitches(slot, 16, 28).forEach(function(b){
       /* voices may meet: a complete seventh chord resolving to its tonic can
          leave a voice nowhere to go but onto its neighbour's note, and a
@@ -3657,17 +3657,25 @@
       updateVoices();
       rep = runChecks(slot + 1);
       if (rep.errors) continue;
-      clean++;
-      if (!quick && clean <= SOLVE_LOOKAHEAD && slot + 1 < state.chords.length &&
-          !solveChord(slot + 1, true)){
-        fallback = fallback || trial;       /* legal, but nothing can follow it */
-        continue;
+      own = rep.cautions > base || risky(slot, c, prev, tones);
+      follow = true;
+      if (!quick && looked < SOLVE_LOOKAHEAD && slot + 1 < state.chords.length){
+        looked++;
+        follow = solveChord(slot + 1, true);
+        if (!follow){
+          fallback = fallback || trial;     /* legal, but nothing can follow it */
+          continue;
+        }
       }
       /* An answer the checklist would then tut at is a poor thing to hand
-         anybody, so the search goes on past one. Sometimes every answer is
-         like that — a seventh with nowhere to fall — and then the best of
-         them is given, cautions and all. */
-      if (rep.cautions > base || risky(slot, c, prev, tones)){
+         anybody, so the search goes on past one. That includes one that can
+         only be followed by something the checklist would tut at: a chord
+         whose best continuation is a six-four approached by a leap has not
+         got a continuation worth having, and the fault will be found in the
+         chord after, where it can no longer be put right. Sometimes every
+         answer is like that — a seventh with nowhere to fall — and then the
+         best of them is given, cautions and all. */
+      if (own || follow.grumbled){
         grumbled = grumbled || trial;
         continue;
       }
@@ -3676,6 +3684,7 @@
     }
     state.notes = was;
     updateVoices();
+    if (!answer && grumbled) grumbled.grumbled = true;
     return answer || grumbled || fallback;
   }
   function flashShow(word){
