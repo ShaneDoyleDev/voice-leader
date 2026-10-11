@@ -1864,6 +1864,12 @@
      that exist only once inversions do — what a six-four's bass has to be
      doing, and an inverted seventh chord's completeness — are in the
      checklist below. */
+  /* The cadential six-four is the tonic's second inversion standing in front
+     of the dominant, over a bass that does not move. Any other six-four over
+     a held bass is something else, and is not asked to resolve like one. */
+  function isCadential(chord, next){
+    return !hasSeventh(chord) && deg(chord) === 1 && deg(next) === 5;
+  }
   function bassOf(list){
     return list.reduce(function(x, y){ return y.midi < x.midi ? y : x; });
   }
@@ -2167,7 +2173,8 @@
         var inBy = before ? low.step - before.step : null, outBy = after.step - low.step;
         var stepped = Math.abs(outBy) === 1 && (inBy == null || Math.abs(inBy) === 1);
         var use = sat && held ? "A pedal six-four"
-                : held ? "A cadential six-four"
+                : held ? (isCadential(state.chords[slot], state.chords[slot + 1])
+                          ? "A cadential six-four" : "A six-four over a held bass")
                 : !stepped ? null
                 : (inBy == null || inBy * outBy > 0) ? "A passing six-four"
                 : "A neighbouring six-four";
@@ -2422,6 +2429,31 @@
               "the same way, " + pre[m].name + " to " + a[m].name + " to " + b[m].name +
               " \u2014 a leap that size wants the line to turn back after it, by step for " +
               "preference.", null, { line:[i - 1, i, i + 1], voice:m });
+      }
+
+      /* The cadential six-four resolves, and that is what it is for. Above
+         the bass, which is the fifth of the tonic and the root of the
+         dominant, stand the tonic's root, a fourth up, and its third, a
+         sixth up. They are not chord tones of the dominant, and each leans
+         down by step onto one that is: the fourth onto the dominant's third,
+         the sixth onto its fifth. A voice that holds its note is already
+         told it is no tone of the chord it is in, and is not told twice. */
+      if (isCadential(state.chords[i], state.chords[i + 1]) &&
+          bassOf(a).letter === chordLetters(state.chords[i])[2] &&
+          bassOf(b).step === bassOf(a).step){
+        var six = chordLetters(state.chords[i]), dom = chordLetters(state.chords[i + 1]);
+        a.forEach(function(n, idx){
+          var up = n.letter === six[0] ? 0 : n.letter === six[1] ? 1 : -1;
+          if (up < 0 || a[idx] === bassOf(a)) return;
+          var to = b[idx];
+          if (dom.indexOf(to.letter) < 0) return;
+          if (to.step === n.step - 1) return;
+          add("error", VOICES[idx] + " has the " + (up ? "sixth" : "fourth") + " above the " +
+              "bass, " + n.name + ", which in a cadential six-four falls by step to " +
+              letterText(state.chords[i + 1], dom[up ? 2 : 1]) + ", the " +
+              (up ? "fifth" : "third") + " of the dominant; it goes to " + to.name + ".",
+              "falls by step", { move:i, voices:[idx] });
+        });
       }
 
       /* The seventh falls by step. It is the whole reason the chord is
