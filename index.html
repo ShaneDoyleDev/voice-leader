@@ -216,6 +216,12 @@
     padding:12px 14px; border-top:1px solid var(--line);
   }
   .checkbar p{margin:0;font-size:13px;color:var(--ink-soft)}
+  .pick{display:flex; flex-wrap:wrap; align-items:center; gap:8px}   /* choosing among Assist's answers */
+  .checkbar .pick button.quiet{
+    background:var(--surface); color:var(--ink); border-color:var(--line); padding:10px 14px;
+  }
+  .checkbar .pick button.quiet:hover{border-color:var(--rule)}
+  .checkbar .pick button:disabled{opacity:.45; cursor:default}
   .checkbar button{
     background:var(--ink); color:var(--surface); border-color:var(--ink);
     font-size:14px; padding:10px 18px;
@@ -440,6 +446,14 @@
         <button type="button" id="check" hidden>Check voice leading</button>
         <button type="button" id="showme" class="ghost" hidden
                 title="Write a valid voicing for the next chord, leaving everything already on the staff as it is">Assist</button>
+        <div class="pick" id="pick" role="group" aria-label="Assist's answers" hidden>
+          <button type="button" class="quiet" id="pick-prev" title="The answer before this one">Previous</button>
+          <button type="button" class="quiet" id="pick-next" title="The next answer">Next</button>
+          <button type="button" class="quiet" id="pick-hear"
+                  title="Hear this answer after the chord before it">Hear</button>
+          <button type="button" id="pick-use" title="Write this answer on the staff">Use this</button>
+          <button type="button" class="quiet" id="pick-cancel" title="Leave the staff as it is (Esc)">Cancel</button>
+        </div>
         <p id="checkhint" aria-live="polite"></p>
       </div>
     </div>
@@ -1513,6 +1527,7 @@
        below are drawn in its colours, so it cannot be tested after them */
     if (report && reportKey !== notesKey()) report = null;
     if (!report) flowAt = null;
+    if (proposal && proposal.key !== notesKey()){ proposal = null; stopHearing(); }
     settleHistory();
     tintVars = null;                       /* re-read the palette, in case the theme moved */
     if (playingSlot !== tintTo){            /* a chord started or stopped sounding */
@@ -1529,6 +1544,14 @@
          are on the same chord */
       layerNotes.appendChild(noteGroup(n,{ color: noteColor(n), stem: stemFor(n) }));
     });
+    /* an answer on offer: not on the staff yet, and drawn so as to say so */
+    if (proposal){
+      layerSlot.appendChild(el("rect",{x:SLOT_X[proposal.slot]-24,y:44,width:48,height:172,rx:3,
+                                       fill:"var(--accent-soft)"}));
+      proposedNotes().forEach(function(n){
+        layerGhost.appendChild(noteGroup(n,{color:"var(--accent)", pop:false, stem:n.stem}));
+      });
+    }
     if (drag)
       layerGhost.appendChild(noteGroup(drag.note,{color:"var(--accent)", pop:false,
         name: touching ? nameAt(drag.note.slot, drag.note.step) : null}));
@@ -1567,12 +1590,14 @@
        not a chord has all its notes and whether or not the chords before it
        are right; the only thing it needs is something of yours to read. */
     var mine = state.notes.length > 0;
-    checkBtn.hidden = false;
+    checkBtn.hidden = !!proposal;             /* choosing an answer is one thing at a time */
     checkBtn.disabled = !mine;
+    pickBox.hidden = !proposal;
+    pickPrev.disabled = pickNext.disabled = !proposal || proposal.list.length < 2;
     undoBtn.disabled = !undoStack.length;
     redoBtn.disabled = !redoStack.length;
     /* asking for an answer makes sense until the whole thing is right */
-    showBtn.hidden = nextToWrite() == null;
+    showBtn.hidden = !!proposal || nextToWrite() == null;
     checkBtn.textContent = "Check";
     /* Play stays up throughout, so a part-written progression can be heard;
        an empty chord simply passes in silence */
@@ -1584,7 +1609,8 @@
     }
     var done = state.chords.filter(function(c, k){ return filled(k); }).length;
     checkHint.textContent =
-      (assistNote && assistNote.key === notesKey()) ? assistNote.text
+      proposal ? proposalText()
+      : (assistNote && assistNote.key === notesKey()) ? assistNote.text
       : all ? "Doubling, spacing, crossing, the leading tone and parallels."
       : !mine ? ""
       : done + " of " + state.chords.length + " chords complete. Check any time; it reads what is written.";
@@ -1594,6 +1620,8 @@
   var chips = document.getElementById("chips");
   var checkBtn = document.getElementById("check"), checkHint = document.getElementById("checkhint");
   var undoBtn = document.getElementById("btn-undo"), redoBtn = document.getElementById("btn-redo");
+  var pickBox = document.getElementById("pick"), pickPrev = document.getElementById("pick-prev"),
+      pickNext = document.getElementById("pick-next");
   var showBtn = document.getElementById("showme");
   var playBtn = document.getElementById("play");
   playBtn.addEventListener("click", playProgression);
@@ -3296,6 +3324,8 @@
     enterStage();
   });
   document.getElementById("edit").addEventListener("click", function(){
+    proposal = null;                 /* an answer on offer belongs to the staff it was offered on */
+    stopHearing();
     stopPlayback();
     stage.hidden = true;
     setup.hidden = false;
@@ -3470,11 +3500,13 @@
   function candidatesFor(slot, from, keep){
     var tones = chordLetters(state.chords[slot]);
     var prev = slot > 0 ? notesIn(slot - 1) : [], cands = [];
+    var have = keep ? from.filter(function(n){ return n.slot === slot; })
+                          .map(function(n){ return n.step; }) : [];
     tonePitches(slot, 16, 28).forEach(function(b){
       /* voices may meet: a complete seventh chord resolving to its tonic can
          leave a voice nowhere to go but onto its neighbour's note, and a
          search that wanted four distinct pitches would call that no answer */
-      tonePitches(slot, b, keep ? 42 : 33).forEach(function(t){
+      tonePitches(slot, b, have.length ? 42 : 33).forEach(function(t){
         tonePitches(slot, t, t + 7).forEach(function(a){        /* within an octave */
           tonePitches(slot, a, a + 7).forEach(function(sop){
             if (new Set([b, t, a, sop]).size < 3) return;       /* no note three times over */
@@ -3485,8 +3517,6 @@
     });
     cands.forEach(function(c){ c.cost = costOf(slot, c, prev, tones); });
     cands.sort(function(x, y){ return x.cost - y.cost; });
-    var have = keep ? from.filter(function(n){ return n.slot === slot; })
-                          .map(function(n){ return n.step; }) : [];
     if (!have.length) return cands;
     return cands.filter(function(c){
       var left = c.slice();
@@ -3655,15 +3685,173 @@
     return answer || grumbled || fallback;
   }
 
-  /* Assist writes the next chord that has not got its notes, and nothing
+  /* Assist offers the next chord that has not got its notes, and nothing
      else. Whatever is on the staff stays exactly where it is: chords already
      written are not replaced, and a chord half written is completed around
-     the notes in it. The answer is valid or there is none. A valid answer
+     the notes in it. An answer is valid or it is not offered. A valid answer
      adds no error that was not there already; where no voicing can be added
      without one, the staff is left untouched and the reason is said in words
-     beside the button, for as long as nothing on the staff has changed. */
-  var assistNote = null;
+     beside the button, for as long as nothing on the staff has changed.
+
+     There is usually more than one valid answer, and which is best is a
+     matter of what you want the line to do, so they are all offered and none
+     is written until you say. The one the search itself would choose comes
+     first. After it come the rest that draw no caution, and then those that
+     do; and within each, an answer with a soprano and bass not yet shown
+     comes before another inner voicing of a pair that has been, so that the
+     first few you step through are different chords to the ear rather than
+     the same chord with its alto moved. Each sounds as you reach it, and can
+     be heard again after the chord before it, which is the thing actually
+     being chosen. Nothing is on the staff until Use this: what is shown is a
+     proposal, drawn in the accent colour, and it is withdrawn the moment
+     anything on the staff changes under it. */
+  var assistNote = null, proposal = null;
   function sayAssist(text){ assistNote = { text:text, key:notesKey() }; }
+  function spreadOut(list){
+    var seen = {}, first = [], rest = [];
+    list.forEach(function(o){
+      var frame = o.c[0] + ":" + o.c[3];
+      if (seen[frame]) rest.push(o); else { seen[frame] = true; first.push(o); }
+    });
+    return first.concat(rest);
+  }
+  function assistOptions(slot){
+    var was = state.notes, tones = chordLetters(state.chords[slot]);
+    var kept = was.filter(function(n){ return n.slot !== slot; });
+    var there = was.filter(function(n){ return n.slot === slot; });
+    var prev = slot > 0 ? notesIn(slot - 1) : [];
+    var depth = Math.max(slot + 1, lastWritten(was) + 1);
+    var before = runChecks(depth), plain = [], marked = [], top = null;
+    var best = solveChord(slot, false, true);
+    var bestKey = best ? best.map(function(n){ return n.step; })
+                             .sort(function(a, b){ return a - b; }).join(",") : "";
+    candidatesFor(slot, was, true).forEach(function(c){
+      state.notes = kept.concat(trialOf(slot, c, was, true));
+      updateVoices();
+      var rep = runChecks(depth);
+      if (rep.errors > before.errors) return;
+      var left = there.map(function(n){ return n.step; });
+      var o = { c:c, info:null,
+                add:c.filter(function(st){            /* what is not already there */
+                  var at = left.indexOf(st);
+                  if (at < 0) return true;
+                  left.splice(at, 1);
+                  return false;
+                }) };
+      if (c.join(",") === bestKey) top = o;
+      else if (rep.cautions > before.cautions || risky(slot, c, prev, tones)) marked.push(o);
+      else plain.push(o);
+    });
+    state.notes = was;
+    updateVoices();
+    return { list:(top ? [top] : []).concat(spreadOut(plain), spreadOut(marked)),
+             depth:depth, before:before };
+  }
+  function proposedNotes(){
+    if (!proposal) return [];
+    var o = proposal.list[proposal.at], slot = proposal.slot, twice = {};
+    var real = notesIn(slot).map(function(n){ return n.step; });
+    return o.add.map(function(step){
+      var staff = step >= 28 ? "treble" : "bass", n = { slot:slot, step:step, staff:staff };
+      /* a note that meets another on its pitch turns its stem the other way */
+      if (real.indexOf(step) > -1 || twice[step])
+        n.stem = (twice[step] || step >= STAVES[staff].mid) ? "up" : "down";
+      twice[step] = true;
+      return n;
+    });
+  }
+  /* what an answer is, in a line: its notes, its position, and anything the
+     checklist would say about it that it is not saying already */
+  function describeOption(o){
+    if (o.info) return o.info;
+    var p = proposal, slot = p.slot, was = state.notes, had = {}, fresh = [], dead = false;
+    p.before.blocks.forEach(function(b){ b.items.forEach(function(it){
+      if (it.level === "caution") had[it.text] = (had[it.text] || 0) + 1; }); });
+    state.notes = was.concat(o.add.map(function(step){
+      return { slot:slot, step:step, staff: step >= 28 ? "treble" : "bass" }; }));
+    updateVoices();
+    runChecks(p.depth).blocks.forEach(function(b){ b.items.forEach(function(it){
+      if (it.level !== "caution") return;
+      if (had[it.text] > 0) had[it.text]--; else fresh.push(it.text.split(" \u2014")[0]);
+    }); });
+    if (slot + 1 < state.chords.length && !slotCount(slot + 1))
+      dead = !solveChord(slot + 1, true, true);
+    state.notes = was;
+    updateVoices();
+    var at = chordLetters(state.chords[slot]).indexOf(o.c[0] % 7);
+    o.info = o.c.map(function(step){ return nameAt(slot, step); }).join(" ") + " \u2014 " +
+             (POSITIONS[at] || "").toLowerCase() + ". " +
+             (fresh.length ? fresh.length + " to watch: " + fresh[0] +
+                             (fresh.length > 1 ? ", and " + (fresh.length - 1) + " more" : "") + "."
+                           : "Nothing to watch.") +
+             (dead ? " No valid chord can follow it." : "");
+    return o.info;
+  }
+  function proposalText(){
+    var p = proposal, n = p.list.length, o = p.list[p.at];
+    return (n === 1 ? "The only valid answer for chord " + (p.slot + 1)
+                    : "Answer " + (p.at + 1) + " of " + n + " for chord " + (p.slot + 1)) +
+           ": " + describeOption(o);
+  }
+  /* each answer sounds as it is reached; asked for, it sounds after the chord
+     before it, which is how the choice will actually be heard */
+  function audition(inContext){
+    if (!proposal) return;
+    var p = proposal, steps = [];
+    if (inContext && p.slot > 0 && slotCount(p.slot - 1))
+      steps.push({ slot:p.slot - 1, ms:850,
+                   notes:notesIn(p.slot - 1).map(function(n){ return { slot:n.slot, step:n.step }; }) });
+    steps.push({ slot:p.slot, ms:1200,
+                 notes:p.list[p.at].c.map(function(step){ return { slot:p.slot, step:step }; }) });
+    audio();
+    hearSteps(steps);
+  }
+  /* on a narrow screen the staff pans, and an answer offered for a chord
+     that is off the edge of it is an answer nobody can see */
+  function showColumn(slot){
+    var w = wrap.clientWidth;
+    if (wrap.scrollWidth <= w + 1) return;
+    /* measured, not assumed: the staff is drawn at whatever scale it was fitted to */
+    var x = SLOT_X[slot] * svg.getBoundingClientRect().width / svg.viewBox.baseVal.width;
+    if (x - 48 >= wrap.scrollLeft && x + 48 <= wrap.scrollLeft + w) return;
+    wrap.scrollTo({ left:Math.max(0, x - w / 2), behavior: reducedMotion() ? "auto" : "smooth" });
+  }
+  function turnProposal(by){
+    if (!proposal || proposal.list.length < 2) return;
+    var n = proposal.list.length;
+    proposal.at = (proposal.at + by + n) % n;
+    audition(false);                                /* renders as it sounds */
+  }
+  function dropProposal(){
+    if (!proposal) return;
+    proposal = null;
+    stopHearing();
+    playingSlot = null;
+    render();
+  }
+  function useProposal(){
+    if (!proposal) return;
+    var slot = proposal.slot, add = proposal.list[proposal.at].add;
+    stopHearing();
+    playingSlot = null;
+    proposal = null;
+    assistNote = null;
+    state.notes = state.notes.concat(add.map(function(step){
+      return { slot:slot, step:step, staff: step >= 28 ? "treble" : "bass" }; }));
+    /* and then it is checked, like anything else written here. The notes
+       have only this moment arrived, so they are read into voices first;
+       everywhere else a render has already done that. */
+    updateVoices();
+    var depth = touchedDepth();
+    if (depth >= 1){
+      report = runChecks(depth);
+      reportKey = notesKey();
+      flowAt = performance.now() - (reducedMotion() ? 1e6 : 0);
+    }
+    render();
+    var again = document.getElementById("showme");
+    if (!again.hidden) again.focus({preventScroll:true});
+  }
   document.getElementById("showme").addEventListener("click", function(){
     var slot = nextToWrite();
     if (slot == null){
@@ -3680,26 +3868,31 @@
       render();
       return;
     }
-    var answer = solveChord(slot, false, true);
-    if (!answer){
+    var found = assistOptions(slot);
+    if (!found.list.length){
       sayAssist("No valid solution for chord " + (slot + 1) + " that keeps what is already " +
                 "on the staff. Nothing has been changed.");
       render();
       return;
     }
-    state.notes = state.notes.concat(answer.filter(function(n){ return there.indexOf(n) < 0; }));
     assistNote = null;
-    /* and then it is checked, like anything else written here. The notes
-       have only this moment arrived, so they are read into voices first;
-       everywhere else a render has already done that. */
-    updateVoices();
-    var depth = touchedDepth();
-    if (depth >= 1){
-      report = runChecks(depth);
-      reportKey = notesKey();
-      flowAt = performance.now() - (reducedMotion() ? 1e6 : 0);
-    }
-    render();
+    proposal = { slot:slot, list:found.list, at:0, key:notesKey(),
+                 depth:found.depth, before:found.before };
+    audition(false);                                /* renders, and shows the choosing row */
+    showColumn(slot);
+    document.getElementById(found.list.length > 1 ? "pick-next" : "pick-use").focus({preventScroll:true});
+  });
+  document.getElementById("pick-prev").addEventListener("click", function(){ turnProposal(-1); });
+  document.getElementById("pick-next").addEventListener("click", function(){ turnProposal(1); });
+  document.getElementById("pick-hear").addEventListener("click", function(){ audition(true); });
+  document.getElementById("pick-use").addEventListener("click", useProposal);
+  document.getElementById("pick-cancel").addEventListener("click", function(){
+    dropProposal();
+    var again = document.getElementById("showme");
+    if (!again.hidden) again.focus({preventScroll:true});
+  });
+  document.addEventListener("keydown", function(e){
+    if (e.key === "Escape" && proposal){ e.preventDefault(); dropProposal(); }
   });
 
   /* ---------- the exercise as text ----------------------------------------
