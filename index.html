@@ -1708,7 +1708,7 @@
     var done = state.chords.filter(function(c, k){ return filled(k); }).length;
     checkHint.textContent =
       all ? "Doubling, spacing, crossing, the leading tone and parallels."
-      : !mine ? "Write notes in any order, and check whenever you like \u2014 even part-way through a chord."
+      : !mine ? ""
       : done + " of " + state.chords.length + " chords complete. Check any time; it reads what is written.";
     remember();
   }
