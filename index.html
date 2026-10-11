@@ -1577,6 +1577,9 @@
      instead of each flying its own flag, which is how the eye is shown where
      the beats are. A rest breaks a beam and so does the end of the beat.
 
+     In four, plain quavers go further and are beamed across the two beats of
+     a half-bar.
+
      A beam joins stems, and stems here have belonged to single notes, each
      pointing whichever way its own height on the staff sends it. That cannot
      be beamed: one beam needs its stems to point one way. So within a beam
@@ -1587,16 +1590,36 @@
      enough to read. Semiquavers take a second beam, and a lone one next
      to a quaver takes a stub of one, pointing at the note it belongs with. */
   var BEAM_THICK = S / 2, BEAM_GAP = S * 0.75, BEAM_STUB = S * 1.1, STEM_MIN = 30;
-  var BEAM_CEIL = 37, BEAM_FLOOR = 212, STEM_LEAST = 14;   /* clear of the tone letters, and of the numerals */
+  var BEAM_CEIL = 37, BEAM_FLOOR = 213, STEM_LEAST = 6;    /* clear of the tone letters, and of the numerals */
   function beamPlan(){
     var bare = [], shapes = [], groups = [], open = null;
     var half = glyphW("noteheadBlack", S) / 2;
-    timeline().events.forEach(function(e){
+    timeline().events.forEach(function(e, at){
       var can = e.slot != null && plainOf(e.len) <= 2;
       var beat = e.bar + ":" + Math.floor(e.pos / 4);
-      if (can && open && open.beat === beat) open.list.push(e);
-      else { open = can ? { beat:beat, list:[e] } : null; if (open) groups.push(open); }
+      if (can && open && open.beat === beat){ open.list.push(e); open.last = at; }
+      else {
+        open = can ? { beat:beat, bar:e.bar, no:Math.floor(e.pos / 4), first:at, last:at, list:[e] } : null;
+        if (open) groups.push(open);
+      }
     });
+    /* In four, plain quavers are beamed across the two beats of a half-bar:
+       four of them under one beam, or three beside a rest. Never across the
+       middle of the bar, which the eye needs to find, and not where there
+       are semiquavers among them, which are easier read a beat at a time. */
+    if (state.meter === 4){
+      var joined = [], plain = function(g){ return g.list.every(function(e){ return e.len === 2; }); };
+      groups.forEach(function(g){
+        var before = joined[joined.length - 1];
+        if (before && before.bar === g.bar && g.no === before.no + 1 && g.no % 2 === 1 &&
+            g.first === before.last + 1 && plain(before) && plain(g)){
+          before.list = before.list.concat(g.list);
+          before.last = g.last;
+          before.no = g.no;        /* the half-bar is full: nothing further joins it */
+        } else joined.push(g);
+      });
+      groups = joined;
+    }
     function slab(x1, y1, x2, y2, toward){
       shapes.push(el("polygon",{ fill:"var(--ink)",
         points:[x1, y1, x2, y2, x2, y2 + toward * BEAM_THICK, x1, y1 + toward * BEAM_THICK].join(" ") }));
@@ -1606,9 +1629,11 @@
        the treble, below the bass — where the stems have somewhere to run.
        Outside is not unlimited either: the chord's tones are listed above
        and its numeral stands below, and the beam stops short of both, the
-       stems simply being shorter for it. Only where that would leave a stem
-       too short to see does the beam turn and go inward instead. */
+       stems simply being shorter for it. A short stem is better than a beam
+       driven through the other staff's notes, so the beam turns inward only
+       where staying out would leave a stem with nothing to it at all. */
     function fit(run, staff, up){
+      var out = up === (staff === "treble");
       run.forEach(function(c){
         var ys = c.notes.map(function(n){ return yOf(n.step, staff); });
         c.top = Math.min.apply(null, ys);
@@ -1623,15 +1648,21 @@
         var room = up ? (c.top - STEM_MIN) - line(c.x) : (c.bot + STEM_MIN) - line(c.x);
         if (up ? room < shift : room > shift) shift = room;
       });
-      /* held inside the band between the tone letters and the numerals */
+      /* Held inside the band between the tone letters and the numerals. A
+         beam that has run out of room has none to spare for leaning, either:
+         it lies flat along the limit, which keeps what stem there is as long
+         as it can be. Only outward beams are held — one that has turned
+         inward is between the staves and nowhere near either. */
       var edge = up ? Math.min(line(a.x), line(z.x)) + shift : Math.max(line(a.x), line(z.x)) + shift;
-      if (up && edge < BEAM_CEIL) shift += BEAM_CEIL - edge;
-      if (!up && edge > BEAM_FLOOR) shift -= edge - BEAM_FLOOR;
+      var flat = null;
+      if (out && up && edge < BEAM_CEIL) flat = BEAM_CEIL;
+      if (out && !up && edge > BEAM_FLOOR) flat = BEAM_FLOOR;
+      function beamY(x){ return flat != null ? flat : line(x) + shift; }
       run.forEach(function(c){
-        var stem = up ? c.top - (line(c.x) + shift) : (line(c.x) + shift) - c.bot;
+        var stem = up ? c.top - beamY(c.x) : beamY(c.x) - c.bot;
         if (stem < shortest) shortest = stem;
       });
-      return { up:up, shortest:shortest, y:function(x){ return line(x) + shift; } };
+      return { up:up, shortest:shortest, y:beamY };
     }
     function beamRun(run, staff){
       var out = staff === "treble", plan = fit(run, staff, out);
