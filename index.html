@@ -439,8 +439,8 @@
       <div class="checkbar">
         <button type="button" id="check" hidden>Check voice leading</button>
         <button type="button" id="showme" class="ghost" hidden
-                title="Write a correct voicing for the chord you are on, in place of what is there">Assist</button>
-        <p id="checkhint"></p>
+                title="Write a valid voicing for the next chord, leaving everything already on the staff as it is">Assist</button>
+        <p id="checkhint" aria-live="polite"></p>
       </div>
     </div>
 
@@ -1572,7 +1572,7 @@
     undoBtn.disabled = !undoStack.length;
     redoBtn.disabled = !redoStack.length;
     /* asking for an answer makes sense until the whole thing is right */
-    showBtn.hidden = all && report && !report.errors && report.depth === depth;
+    showBtn.hidden = nextToWrite() == null;
     checkBtn.textContent = "Check";
     /* Play stays up throughout, so a part-written progression can be heard;
        an empty chord simply passes in silence */
@@ -1584,7 +1584,8 @@
     }
     var done = state.chords.filter(function(c, k){ return filled(k); }).length;
     checkHint.textContent =
-      all ? "Doubling, spacing, crossing, the leading tone and parallels."
+      (assistNote && assistNote.key === notesKey()) ? assistNote.text
+      : all ? "Doubling, spacing, crossing, the leading tone and parallels."
       : !mine ? ""
       : done + " of " + state.chords.length + " chords complete. Check any time; it reads what is written.";
     remember();
@@ -3392,16 +3393,11 @@
       if (tones.indexOf(step % 7) > -1) out.push(step);
     return out;
   }
-  /* the chord the answer is wanted for: the first that is unwritten, or
-     written and not yet right */
-  function firstWanting(){
-    var k, rep;
-    for (k = 0; k < state.chords.length; k++){
-      if (!filled(k)) return k;
-      updateVoices();
-      rep = runChecks(k + 1);
-      if (rep.errors) return k;
-    }
+  /* The chord Assist writes is the next one still to be written: the first
+     that has not got all its notes. Chords that have are left as they are,
+     right or wrong; it builds on what is there rather than over it. */
+  function nextToWrite(){
+    for (var k = 0; k < state.chords.length; k++) if (!filled(k)) return k;
     return null;
   }
   /* The cost that orders the candidates is what makes an answer worth
@@ -3466,15 +3462,19 @@
      nothing can follow any of them the smoothest is given anyway — the wall
      is then real, and worth meeting. */
   var SOLVE_LOOKAHEAD = 24, SOLVE_TRIES = 400;
-  /* Every way of voicing the chord, smoothest first. */
-  function candidatesFor(slot){
+  /* Every way of voicing the chord, smoothest first. Where the chord already
+     has notes and they are to be kept, only voicings that contain them are
+     offered, so that what is on the staff is built around and not over — and
+     the tenor is then free to sit anywhere on the staff, since a voice written
+     high cannot be moved out of the way. */
+  function candidatesFor(slot, from, keep){
     var tones = chordLetters(state.chords[slot]);
     var prev = slot > 0 ? notesIn(slot - 1) : [], cands = [];
     tonePitches(slot, 16, 28).forEach(function(b){
       /* voices may meet: a complete seventh chord resolving to its tonic can
          leave a voice nowhere to go but onto its neighbour's note, and a
          search that wanted four distinct pitches would call that no answer */
-      tonePitches(slot, b, 33).forEach(function(t){
+      tonePitches(slot, b, keep ? 42 : 33).forEach(function(t){
         tonePitches(slot, t, t + 7).forEach(function(a){        /* within an octave */
           tonePitches(slot, a, a + 7).forEach(function(sop){
             if (new Set([b, t, a, sop]).size < 3) return;       /* no note three times over */
@@ -3485,25 +3485,48 @@
     });
     cands.forEach(function(c){ c.cost = costOf(slot, c, prev, tones); });
     cands.sort(function(x, y){ return x.cost - y.cost; });
-    return cands;
+    var have = keep ? from.filter(function(n){ return n.slot === slot; })
+                          .map(function(n){ return n.step; }) : [];
+    if (!have.length) return cands;
+    return cands.filter(function(c){
+      var left = c.slice();
+      return have.every(function(st){
+        var at = left.indexOf(st);
+        if (at < 0) return false;
+        left.splice(at, 1);
+        return true;
+      });
+    });
   }
-  function trialOf(slot, c){
+  /* the notes of one voicing, the ones already there being the very notes
+     that are there, so that nothing on the staff is replaced by a copy */
+  function trialOf(slot, c, from, keep){
+    var mine = keep ? from.filter(function(n){ return n.slot === slot; }) : [];
     return c.map(function(step){
+      for (var i = 0; i < mine.length; i++)
+        if (mine[i].step === step) return mine.splice(i, 1)[0];
       return { slot:slot, step:step, staff: step >= 28 ? "treble" : "bass" };
     });
+  }
+  function lastWritten(list){
+    var last = -1;
+    list.forEach(function(n){ if (n.slot > last) last = n.slot; });
+    return last;
   }
 
   /* One chord at a time is not enough to find an answer that is clean all
      the way through. Looking a chord ahead catches the chord that cannot be
      followed, but not the one that can be followed only into a corner two
      chords on, and a fault met there is met when nothing before it can any
-     longer be changed. So the search first tries the rest of the progression:
-     the smoothest voicing of every remaining chord, backing out the moment
-     one of them would draw an error or a caution, until a path is found that
-     is clean from here to the last chord. Its first chord is the answer.
-     It is given a budget, since a progression that has no clean answer would
-     otherwise be searched for ever; and a failure is remembered, so the next
-     press does not pay for it again. */
+     longer be changed. So the search first tries the chords that follow: the
+     smoothest voicing of each, backing out the moment one of them would draw
+     an error or a caution it did not have, until a path is found that is
+     clean to the end. Its first chord is the answer. Where the chords after
+     it have been written already they are not searched, only met: the search
+     stops at the first of them, having checked that the chord it is giving
+     goes into it without a fault. It is given a budget, since a progression
+     that has no clean answer would otherwise be searched for ever; and a
+     failure is remembered, so the next press does not pay for it again. */
   var PATH_BUDGET = 500, PATH_WIDTH = 60, PATH_ALLOW = [0, 1, 2];
   var pathDead = null;
   function prefixSig(slot){
@@ -3513,34 +3536,44 @@
   function progressionSig(){
     return state.mode + "|" + state.tonic + "|" + state.chords.join(",");
   }
-  function cleanPath(slot, allow){
-    var n = state.chords.length, was = state.notes, nodes = 0, chosen = [];
+  function cleanPath(slot, allow, keep){
+    var n = state.chords.length, was = state.notes, nodes = 0, chosen = [], used = 0;
     var head = was.filter(function(x){ return x.slot < slot; });
-    var base = runChecks(slot).cautions;
-    function lay(extra){
-      state.notes = head.concat.apply(head, chosen).concat(extra || []);
+    var last = keep ? lastWritten(was) : -1;
+    var written = {};
+    was.forEach(function(x){ written[x.slot] = true; });
+    function lay(extra, k){
+      /* what stands after the chord being tried is what the user has put
+         there, or nothing at all when the answer is free to run on */
+      var rest = keep ? was.filter(function(x){ return x.slot > k; }) : [];
+      state.notes = head.concat.apply(head, chosen).concat(extra || [], rest);
       updateVoices();
     }
     function walk(k){
-      if (k === n) return true;
-      lay();
+      if (k === n || (keep && k > slot && written[k])) return true;
       var tones = chordLetters(state.chords[k]);
-      var list = candidatesFor(k).slice(0, PATH_WIDTH), i, trial, rep;
+      var depth = keep ? Math.max(k + 1, last + 1) : k + 1;
+      lay(keep && k === slot ? was.filter(function(x){ return x.slot === slot; }) : [], k);
+      var before = runChecks(depth);
+      var list = candidatesFor(k, was, keep && k === slot).slice(0, PATH_WIDTH), i, trial, rep, fresh;
       for (i = 0; i < list.length; i++){
         if (++nodes > PATH_BUDGET) return null;
         /* a six-four on the last chord has nothing after it to resolve into */
         if (k === n - 1 && !hasSeventh(state.chords[k]) && tones.indexOf(list[i][0] % 7) === 2)
           continue;
-        trial = trialOf(k, list[i]);
-        lay(trial);
-        rep = runChecks(k + 1);
-        if (rep.errors || rep.cautions > base + allow) continue;
+        trial = trialOf(k, list[i], was, keep && k === slot);
+        lay(trial, k);
+        rep = runChecks(depth);
+        fresh = rep.cautions - before.cautions;
+        if (rep.errors > before.errors || used + fresh > allow) continue;
         chosen.push(trial);
+        used += fresh;
         var r = walk(k + 1);
         if (r) return true;
+        used -= fresh;
         chosen.pop();
         if (r === null) return null;
-        lay();
+        lay(keep && k === slot ? was.filter(function(x){ return x.slot === slot; }) : [], k);
       }
       return false;
     }
@@ -3550,7 +3583,11 @@
     return found ? chosen[0] : null;
   }
 
-  function solveChord(slot, quick){
+  /* keep: leave whatever is already in this chord where it is and add the
+     rest around it, and leave every other chord alone. Without it the chord
+     is voiced afresh and anything already in it is replaced, which is what
+     is wanted when asking what a chord would be without its fault. */
+  function solveChord(slot, quick, keep){
     var tones = chordLetters(state.chords[slot]);
     var kept = state.notes.filter(function(n){ return n.slot !== slot; });
     var prev = slot > 0 ? notesIn(slot - 1) : [];
@@ -3558,11 +3595,11 @@
       /* Clean all the way if that can be done; and where it cannot, with as
          few cautions as it can be done with, one more at a time. What has
          already failed for this progression is not tried again. */
-      var sig = progressionSig(), level = 0, path, a;
+      var sig = progressionSig() + (keep ? "|keep" : ""), level = 0, path, a;
       if (pathDead && pathDead.sig === sig && slot >= pathDead.slot &&
           prefixSig(pathDead.slot) === pathDead.prefix) level = pathDead.level;
       for (a = level; a < PATH_ALLOW.length; a++){
-        path = cleanPath(slot, PATH_ALLOW[a]);
+        path = cleanPath(slot, PATH_ALLOW[a], keep);
         if (path){
           pathDead = { sig:sig, slot:slot, prefix:prefixSig(slot), level:a };
           return path;
@@ -3570,23 +3607,28 @@
       }
       pathDead = { sig:sig, slot:slot, prefix:prefixSig(slot), level:PATH_ALLOW.length };
     }
-    /* what the chords before this one are already being grumbled at for, so
-       that only this chord's own cautions count against a candidate */
+    /* what the chords already written are being grumbled at for, so that only
+       what this chord adds counts against a candidate */
     var was = state.notes, answer = null, fallback = null, grumbled = null;
-    var base = runChecks(slot).cautions, looked = 0, rep, follow, own, i;
-    var cands = candidatesFor(slot);
+    var depth = keep ? Math.max(slot + 1, lastWritten(was) + 1) : slot + 1;
+    var before = runChecks(keep ? depth : slot);
+    var looked = 0, rep, follow, own, i;
+    var cands = candidatesFor(slot, was, keep);
+    var wrote = {};
+    was.forEach(function(x){ wrote[x.slot] = true; });
     for (i = 0; i < cands.length && i < SOLVE_TRIES; i++){
       var c = cands[i];
-      var trial = trialOf(slot, c);
+      var trial = trialOf(slot, c, was, keep);
       state.notes = kept.concat(trial);
       updateVoices();
-      rep = runChecks(slot + 1);
-      if (rep.errors) continue;
-      own = rep.cautions > base || risky(slot, c, prev, tones);
+      rep = runChecks(depth);
+      if (rep.errors > before.errors) continue;
+      own = rep.cautions > before.cautions || risky(slot, c, prev, tones);
       follow = true;
-      if (!quick && looked < SOLVE_LOOKAHEAD && slot + 1 < state.chords.length){
+      if (!quick && looked < SOLVE_LOOKAHEAD && slot + 1 < state.chords.length &&
+          !(keep && wrote[slot + 1])){
         looked++;
-        follow = solveChord(slot + 1, true);
+        follow = solveChord(slot + 1, true, keep);
         if (!follow){
           fallback = fallback || trial;     /* legal, but nothing can follow it */
           continue;
@@ -3612,20 +3654,41 @@
     if (!answer && grumbled) grumbled.grumbled = true;
     return answer || grumbled || fallback;
   }
-  function flashShow(word){
-    var b = document.getElementById("showme");
-    b.textContent = word;
-    setTimeout(function(){ b.textContent = "Assist"; }, 1800);
-  }
+
+  /* Assist writes the next chord that has not got its notes, and nothing
+     else. Whatever is on the staff stays exactly where it is: chords already
+     written are not replaced, and a chord half written is completed around
+     the notes in it. The answer is valid or there is none. A valid answer
+     adds no error that was not there already; where no voicing can be added
+     without one, the staff is left untouched and the reason is said in words
+     beside the button, for as long as nothing on the staff has changed. */
+  var assistNote = null;
+  function sayAssist(text){ assistNote = { text:text, key:notesKey() }; }
   document.getElementById("showme").addEventListener("click", function(){
-    var slot = firstWanting();
-    if (slot == null) return;
-    var answer = solveChord(slot);
-    if (!answer){ flashShow("Nothing fits"); render(); return; }
-    var going = state.notes.filter(function(n){ return n.slot === slot; });
-    state.notes = state.notes.filter(function(n){ return going.indexOf(n) === -1; })
-                             .concat(answer);
-    driftAway(going);
+    var slot = nextToWrite();
+    if (slot == null){
+      sayAssist("Every chord already has its notes, so there is nothing for Assist to add.");
+      render();
+      return;
+    }
+    var there = notesIn(slot), tones = chordLetters(state.chords[slot]);
+    var stray = there.filter(function(n){ return tones.indexOf(n.step % 7) < 0; })[0];
+    if (stray){
+      sayAssist("No valid solution for chord " + (slot + 1) + ": " + nameAt(slot, stray.step) +
+                " is already there and is not one of its tones, and Assist does not move " +
+                "what is on the staff. Nothing has been changed.");
+      render();
+      return;
+    }
+    var answer = solveChord(slot, false, true);
+    if (!answer){
+      sayAssist("No valid solution for chord " + (slot + 1) + " that keeps what is already " +
+                "on the staff. Nothing has been changed.");
+      render();
+      return;
+    }
+    state.notes = state.notes.concat(answer.filter(function(n){ return there.indexOf(n) < 0; }));
+    assistNote = null;
     /* and then it is checked, like anything else written here. The notes
        have only this moment arrived, so they are read into voices first;
        everywhere else a render has already done that. */
