@@ -102,7 +102,8 @@
   }
   .seq .slotlen:hover{border-color:var(--accent); color:var(--ink)}
   .seq .slot.rest span{font-style:italic; font-size:15px; color:var(--ink-soft)}
-  .seq .slotbox.over .slot, .seq .slotbox.over .slotlen{border-color:var(--wrong)}
+  .seq .slotbox.tied .slotlen{border-style:dashed}       /* written as notes tied together */
+  .seq .slotlen i{font-style:normal}
 
   button{
     font:500 13px/1 "IBM Plex Sans", sans-serif;
@@ -828,29 +829,60 @@
       return r && LENGTHS.indexOf(r.len) > -1 && r.at === Math.floor(r.at) && r.at >= 0 && r.at <= n;
     }).slice(0, MAX_RESTS);
   }
+  /* A length that is not one note is written as several tied together. From
+     the start of a bar the biggest note that fits goes first, dotted ones
+     included, as a bar is usually read. Coming up to a bar line it is the
+     other way about and without dots, small notes first, so that each one
+     finishes a beat and the last lands squarely on one: five semiquavers
+     before the line are a semiquaver and then a crotchet, not the reverse. */
+  function piecesOf(len, fromBarStart){
+    var sizes = fromBarStart ? LENGTHS : [16, 8, 4, 2, 1], out = [], k;
+    while (len > 0){
+      for (k = 0; sizes[k] > len; k++){}
+      out.push(sizes[k]);
+      len -= sizes[k];
+    }
+    return fromBarStart ? out : out.reverse();
+  }
   /* Everything in the order it sounds: each rest that comes before a chord,
      then the chord, and at the end any rests after the last. Each is given
-     where it starts in its bar. A bar is closed when it is full; a note that
-     runs past the end of one cannot be tied over here, so it is marked, the
-     bar is closed after it and counting starts again from there. */
+     where it starts in its bar. A bar holds what it holds: a chord that is
+     longer than what is left of its bar is carried over the line, written as
+     a note up to the line tied to a note after it, and a rest is simply
+     divided there. So every event is a row of parts, each a single note
+     value in a single bar, and it is the parts that are drawn. */
   function timeline(){
-    var events = [], n = state.chords.length, bar = barLen(), pos = 0, barNo = 0, i;
+    var events = [], n = state.chords.length, bar = barLen(), pos = 0, barNo = 0, total = 0, i;
     for (i = 0; i <= n; i++){
       state.rests.forEach(function(r, j){ if (r.at === i) events.push({ rest:j, len:r.len }); });
       if (i < n) events.push({ slot:i, len:lenOf(i) });
     }
     events.forEach(function(e){
-      e.pos = pos; e.bar = barNo;
-      pos += e.len;
-      if (pos >= bar){ e.over = pos > bar; e.closes = true; pos = 0; barNo++; }
+      var left = e.len, first = true;
+      e.pos = pos; e.bar = barNo; e.parts = [];
+      while (left > 0){
+        var take = Math.min(left, bar - pos);
+        var sizes = (first && take === left) ? [take] : piecesOf(take, pos === 0);
+        sizes.forEach(function(size){
+          e.parts.push({ len:size, pos:pos, bar:barNo });
+          pos += size;
+        });
+        left -= take;
+        first = false;
+        if (pos >= bar){ pos = 0; barNo++; }
+      }
+      e.tied = e.parts.length > 1;                       /* more than one note to say it */
+      e.crosses = e.parts[e.parts.length - 1].bar > e.bar;
+      e.closes = pos === 0;                              /* it ends exactly on a bar line */
+      total += e.len;
     });
-    return { events:events, bars:barNo + (pos ? 1 : 0), short:pos ? bar - pos : 0,
-             over:events.filter(function(e){ return e.over; }) };
+    return { events:events, bars:Math.ceil(total / bar), short:(bar - total % bar) % bar,
+             crossing:events.filter(function(e){ return e.crosses && e.slot != null; }) };
   }
   function eventOf(slot){
     var found = null;
     timeline().events.forEach(function(e){ if (e.slot === slot) found = e; });
-    return found || { pos:0, bar:0, len:4 };
+    return found || { pos:0, bar:0, len:4, parts:[], crosses:false };
   }
 
   /* The time signature stands after the key signature and takes its width
@@ -861,28 +893,43 @@
      and the shortest still get enough for an accidental and for the tones
      listed above the chord to stand clear of the next. */
   var ROOM = { 16:1.9, 12:1.65, 8:1.4, 6:1.2, 4:1, 3:0.92, 2:0.86, 1:0.8 }, COLUMN = 108;
-  var SLOT_X = [], REST_X = [], BAR_X = [];
+  var SLOT_X = [], SLOT_END = [], COLS = [], BAR_X = [];
   function staffStart(){ return SIG_X + sigWidth(S) + TIME_W + 46; }
-  function spanOf(events){
+  /* the parts of everything, in a row: each a note or a rest of one value */
+  function columnsOf(events){
+    var cols = [];
+    events.forEach(function(e){
+      e.parts.forEach(function(part, k){
+        cols.push({ slot:e.slot, rest:e.rest, part:k, of:e.parts.length, len:part.len,
+                    pos:part.pos, bar:part.bar });
+      });
+    });
+    return cols;
+  }
+  function spanOf(cols){
     var total = 0, i;
-    for (i = 0; i + 1 < events.length; i++) total += COLUMN * ROOM[events[i].len];
+    for (i = 0; i + 1 < cols.length; i++) total += COLUMN * ROOM[cols[i].len];
     return total;
   }
-  /* where every chord stands, and with it every rest and bar line */
+  /* where every chord stands, and with it every tied part, rest and bar line */
   function layoutSlots(){
-    var events = timeline().events, first = staffStart(), last = CANVAS - 62, xs = [], i;
-    REST_X = []; BAR_X = [];
-    if (!events.length) return xs;
-    var total = spanOf(events), k = total > 0 ? Math.min(1, (last - first) / total) : 1;
-    var x = first + ((last - first) - total * k) / 2, at = [];
-    events.forEach(function(e){
-      at.push(x);
-      if (e.slot != null) xs[e.slot] = x; else REST_X[e.rest] = x;
-      x += COLUMN * ROOM[e.len] * k;
+    var cols = columnsOf(timeline().events), first = staffStart(), last = CANVAS - 62, xs = [], i;
+    COLS = cols; BAR_X = []; SLOT_END = [];
+    if (!cols.length) return xs;
+    var total = spanOf(cols), k = total > 0 ? Math.min(1, (last - first) / total) : 1;
+    var x = first + ((last - first) - total * k) / 2, bar = barLen();
+    cols.forEach(function(c){
+      c.x = x;
+      if (c.slot != null){
+        if (c.part === 0) xs[c.slot] = x;
+        SLOT_END[c.slot] = x;
+      }
+      x += COLUMN * ROOM[c.len] * k;
     });
     /* a bar line stands nearer the note it comes before than the one it follows */
-    for (i = 0; i + 1 < events.length; i++)
-      if (events[i].closes) BAR_X.push(at[i + 1] - Math.min(40, (at[i + 1] - at[i]) / 2));
+    for (i = 0; i + 1 < cols.length; i++)
+      if (cols[i].pos + cols[i].len >= bar)
+        BAR_X.push(cols[i + 1].x - Math.min(40, (cols[i + 1].x - cols[i].x) / 2));
     return xs;
   }
   /* Below the phone breakpoint the staff stops shrinking to fit. The canvas
@@ -902,7 +949,7 @@
      columns and ran one chord's tone letters into the next one's. */
   var MIN_UNIT_PX = 7.5 / HALF;          /* what a half-step must not go under */
   function canvasFor(){
-    return Math.max(640, Math.round(staffStart() + spanOf(timeline().events) + 62));
+    return Math.max(640, Math.round(staffStart() + spanOf(columnsOf(timeline().events)) + 62));
   }
   function fitStaff(){
     tidyRhythm();
@@ -991,11 +1038,14 @@
     return { slot:slot, idx:-1 };
   }
 
+  /* the chord nearest a point across the staff — and a tied note's later
+     parts are as much its chord as the first is */
   function slotAt(x){
     var best = 0, bd = Infinity, i, d;
-    for (i = 0; i < SLOT_X.length; i++){
-      d = Math.abs(x - SLOT_X[i]);
-      if (d < bd){ bd = d; best = i; }
+    for (i = 0; i < COLS.length; i++){
+      if (COLS[i].slot == null) continue;
+      d = Math.abs(x - COLS[i].x);
+      if (d < bd){ bd = d; best = COLS[i].slot; }
     }
     return best;
   }
@@ -1150,12 +1200,12 @@
     /* and the rests, on both staves, since all four voices are silent. A
        semibreve rest hangs from the fourth line and a minim rest sits on the
        third; the others are set about the middle of the staff. */
-    state.rests.forEach(function(r, j){
-      if (REST_X[j] == null) return;
+    COLS.forEach(function(r){
+      if (r.rest == null) return;
       var plain = plainOf(r.len);
       var name = plain === 16 ? "restWhole" : plain === 8 ? "restHalf" : plain === 4 ? "restQuarter"
                : plain === 2 ? "rest8th" : "rest16th";
-      var w = glyphW(name, S), rx = REST_X[j] - w / 2;
+      var w = glyphW(name, S), rx = r.x - w / 2;
       ["treble","bass"].forEach(function(staff){
         var topY = STAVES[staff].topY;
         layerStaff.appendChild(glyph(name, rx, topY + (plain === 16 ? 1 : 2) * S, S, "var(--ink)"));
@@ -1451,7 +1501,7 @@
       if (t < 1) running = true;
       var ease = 1 - Math.pow(1 - t, 3);
       voices.forEach(function(voice){
-        var x1 = SLOT_X[i] + half + 3, y1 = yOf(a[voice].step, a[voice].staff);
+        var x1 = (SLOT_END[i] != null ? SLOT_END[i] : SLOT_X[i]) + half + 3, y1 = yOf(a[voice].step, a[voice].staff);
         var x2 = SLOT_X[i + 1] - half - 3, y2 = yOf(b[voice].step, b[voice].staff);
         var len = Math.hypot(x2 - x1, y2 - y1);
         layerFlow.appendChild(el("line",{
@@ -1530,10 +1580,30 @@
      unless they are beamed to their neighbours, when the beam draws the stem
      and the note is left bare. A dot stands in a space — the one above,
      where the note is on a line. */
+  function firstCol(slot){
+    for (var i = 0; i < COLS.length; i++) if (COLS[i].slot === slot && COLS[i].part === 0) return COLS[i];
+    return null;
+  }
+  function colsOf(slot){ return COLS.filter(function(c){ return c.slot === slot; }); }
+  /* A tie: a shallow curve from one notehead to the same note in the next
+     part, thicker in the middle than at its ends. It goes on the side away
+     from the rest of the chord — over the upper notes on a staff and under
+     the lower ones — and where a note is alone, on the side its stem is not. */
+  function tieShape(x1, x2, y, above, color){
+    var side = above ? -1 : 1, y0 = y + side * 6, span = x2 - x1;
+    var deep = Math.min(12, 6 + span * 0.05), in1 = x1 + span * 0.28, in2 = x2 - span * 0.28;
+    return el("path",{ fill:color, d:
+      "M" + x1 + " " + y0 +
+      "C" + in1 + " " + (y0 + side * deep) + " " + in2 + " " + (y0 + side * deep) + " " + x2 + " " + y0 +
+      "C" + in2 + " " + (y0 + side * (deep - 3.4)) + " " + in1 + " " + (y0 + side * (deep - 3.4)) + " " + x1 + " " + y0 + "Z" });
+  }
   function noteGroup(note, opts){
-    var g = el("g",{}), x = SLOT_X[note.slot], y = yOf(note.step, note.staff), color = opts.color;
+    var g = el("g",{}), y = yOf(note.step, note.staff), color = opts.color;
     var def = STAVES[note.staff], n = ledgerCount(note.staff, note.step), i, ly;
-    var len = lenOf(note.slot), plain = plainOf(len);
+    /* the first part of its chord unless told which: a tied chord is drawn
+       once for each note it is written as */
+    var col = opts.col || firstCol(note.slot);
+    var x = col ? col.x : SLOT_X[note.slot], len = col ? col.len : lenOf(note.slot), plain = plainOf(len);
     var head = plain === 16 ? "noteheadWhole" : plain === 8 ? "noteheadHalf" : "noteheadBlack";
     var half = glyphW(head, S) / 2;
     for (i = 1; i <= n; i++){
@@ -1541,7 +1611,8 @@
       g.appendChild(el("line",{x1:x-half-4, y1:ly, x2:x+half+4, y2:ly,
                                stroke:color, "stroke-width":1.4}));
     }
-    var acc = printedAccidental(note.slot, note.step);
+    /* a note tied from the one before does not say its accidental again */
+    var acc = (col && col.part > 0) ? null : printedAccidental(note.slot, note.step);
     if (acc) g.appendChild(glyph(acc, x - half - 3 - glyphW(acc, S), y, S, color));
     g.appendChild(glyph(head, x - half, y, S, color));
     /* the stem rises from the right of the head, or falls from its left */
@@ -1594,7 +1665,9 @@
   function beamPlan(){
     var bare = [], shapes = [], groups = [], open = null;
     var half = glyphW("noteheadBlack", S) / 2;
-    timeline().events.forEach(function(e, at){
+    /* it is the parts that are beamed: a tied note is several, each with a
+       value and a place in its bar of its own */
+    COLS.forEach(function(e, at){
       var can = e.slot != null && plainOf(e.len) <= 2;
       var beat = e.bar + ":" + Math.floor(e.pos / 4);
       if (can && open && open.beat === beat){ open.list.push(e); open.last = at; }
@@ -1638,7 +1711,7 @@
         var ys = c.notes.map(function(n){ return yOf(n.step, staff); });
         c.top = Math.min.apply(null, ys);
         c.bot = Math.max.apply(null, ys);
-        c.x = SLOT_X[c.e.slot] + (up ? half - 0.7 : -half + 0.7);
+        c.x = c.e.x + (up ? half - 0.7 : -half + 0.7);
         c.tip = up ? c.top - 42 : c.bot + 42;
       });
       var a = run[0], z = run[run.length - 1], dx = z.x - a.x;
@@ -1675,7 +1748,7 @@
       run.forEach(function(c){
         shapes.push(el("line",{ x1:c.x, y1: up ? c.bot : c.top, x2:c.x, y2:beamY(c.x),
                                 stroke:noteColor(c.notes[0]), "stroke-width":1.4 }));
-        c.notes.forEach(function(n){ bare.push(n); });
+        c.notes.forEach(function(n){ bare.push(n.slot + ":" + n.step + ":" + n.staff + ":" + c.e.part); });
       });
       slab(a.x - 0.7, beamY(a.x - 0.7), z.x + 0.7, beamY(z.x + 0.7), toward);
       /* the second beam, for the semiquavers among them */
@@ -1857,12 +1930,25 @@
                                        fill:"var(--accent-soft)"}));
     var beams = beamPlan();
     beams.shapes.forEach(function(shape){ layerNotes.appendChild(shape); });
+    var headHalf = glyphW("noteheadBlack", S) / 2;
     state.notes.forEach(function(n,i){
       if (drag && drag.note === n) return;
       /* the chord that is sounding colours itself, so the ear and the eye
          are on the same chord */
-      layerNotes.appendChild(noteGroup(n,{ color: noteColor(n), stem: stemFor(n),
-                                           bare: beams.bare.indexOf(n) > -1 }));
+      var color = noteColor(n), parts = colsOf(n.slot), together, above;
+      parts.forEach(function(col, k){
+        layerNotes.appendChild(noteGroup(n,{ color:color, stem: stemFor(n), col:col,
+                                             bare: beams.bare.indexOf(n.slot + ":" + n.step + ":" + n.staff + ":" + k) > -1 }));
+        if (!k) return;
+        if (above == null){
+          together = state.notes.filter(function(m){ return m.slot === n.slot && m.staff === n.staff; })
+                               .sort(function(a, b){ return a.step - b.step; });
+          above = together.length > 1 ? together.indexOf(n) >= together.length / 2
+                                      : n.step >= STAVES[n.staff].mid;
+        }
+        layerNotes.appendChild(tieShape(parts[k - 1].x + headHalf + 2.5, col.x - headHalf - 2.5,
+                                        yOf(n.step, n.staff), above, color));
+      });
     });
     /* an answer on offer: not on the staff yet, and drawn so as to say so */
     if (proposal){
@@ -3689,7 +3775,7 @@
     tl.events.forEach(function(e, at){
       var box = document.createElement("span"), b = document.createElement("button");
       var isRest = e.slot == null, i = e.slot, degree = isRest ? null : state.chords[i];
-      box.className = "slotbox" + (e.over ? " over" : "");
+      box.className = "slotbox" + (e.tied && !isRest ? " tied" : "");
       b.type = "button";
       b.className = "slot" + (isRest ? " rest" : "");
       if (isRest){
@@ -3713,6 +3799,11 @@
       l.title = "A " + LEN_NAME[e.len] + (isRest ? " rest" : " note") + " \u2014 press to give it the length chosen below";
       l.setAttribute("aria-label", LEN_NAME[e.len] + (isRest ? " rest" : " note") + "; press to give it the chosen length");
       l.appendChild(miniNote(e.len, isRest));
+      if (e.crosses && !isRest){              /* it is carried over a bar line, and says so */
+        var over = document.createElement("i");
+        over.textContent = "tied over";
+        l.appendChild(over);
+      }
       l.addEventListener("click", function(){
         if (isRest) state.rests[e.rest].len = armedLen(); else state.lens[i] = armedLen();
         drawSetup();
@@ -3736,12 +3827,19 @@
     if (!whole) return { 1:"a quarter of a beat", 2:"half a beat", 3:"three quarters of a beat" }[part];
     return whole + frac + " beats";
   }
-  /* the progression as bars of lengths: "I half, IV quarter, V quarter | I dotted half, rest quarter" */
+  /* the progression as bars of lengths, part by part, with a tie written as a
+     tilde on either side of the bar line it crosses or the notes it joins:
+     "I half, IV quarter, V quarter~ | ~V half, I half" */
   function barsText(){
     var out = [], bar = [];
     timeline().events.forEach(function(e){
-      bar.push((e.slot == null ? "rest" : numeralOf(state.chords[e.slot])) + " " + LEN_NAME[e.len]);
-      if (e.closes){ out.push(bar.join(", ")); bar = []; }
+      var name = e.slot == null ? "rest" : numeralOf(state.chords[e.slot]);
+      e.parts.forEach(function(part, k){
+        var tie = e.slot != null;
+        bar.push((tie && k ? "~" : "") + name + " " + LEN_NAME[part.len] +
+                 (tie && k + 1 < e.parts.length ? "~" : ""));
+        if (part.pos + part.len >= barLen()){ out.push(bar.join(", ")); bar = []; }
+      });
     });
     if (bar.length) out.push(bar.join(", "));
     return out.join(" | ");
@@ -3780,9 +3878,9 @@
     if (tl.events.length){
       said = tl.bars + (tl.bars === 1 ? " bar" : " bars") +
              (tl.short ? ", the last " + beatsText(tl.short) + " short." : ".");
-      if (tl.over.length)
-        said += " A note in bar " + (tl.over[0].bar + 1) + " runs past the bar line \u2014 nothing " +
-                "can be tied over it here, so shorten it or move it.";
+      if (tl.crossing.length)
+        said += " " + (tl.crossing.length === 1 ? "One chord is" : tl.crossing.length + " chords are") +
+                " longer than what is left of the bar and tied over the bar line.";
     }
     document.getElementById("timenote").textContent = said;
     startnote.textContent = state.chords.length < 2
@@ -4456,12 +4554,13 @@
     out.push("");
     out.push("Key: " + keyName() + " (" + sigText() + ")");
     out.push("Time: " + state.meter + "/4. All four voices share each chord's length.");
-    out.push("Bars: " + barsText());
+    out.push("Bars: " + barsText() + (timeline().crossing.length ? "   (~ is a tie)" : ""));
     out.push("Progression: " + state.chords.map(numeralOf).join(" \u2013 "));
     out.push("");
     state.chords.forEach(function(chord, slot){
       var head = (slot + 1) + ". " + numeralAt(slot) + "  \u2014  " + spell(chord) +
-                 "  (" + LEN_NAME[lenOf(slot)] + ", bar " + (barOf(slot) + 1) + ", " + beatName(slot) + ")";
+                 "  (" + LEN_NAME[lenOf(slot)] + ", bar " + (barOf(slot) + 1) + ", " + beatName(slot) +
+                 (eventOf(slot).crosses ? ", tied over the bar line" : "") + ")";
       var notes = notesIn(slot), row = rows && rows[slot];
       if (!notes.length){ out.push(head + "  \u2014  not written yet"); return; }
       out.push(head);
