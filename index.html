@@ -431,6 +431,8 @@
                 title="Copy the key, the progression and every voice as text">Export</button>
         <button type="button" id="btn-undo" class="ghost" disabled
                 title="Take back the last thing you did on the staff (Ctrl or ⌘ + Z)">Undo</button>
+        <button type="button" id="btn-redo" class="ghost" disabled
+                title="Put back what you took back (Ctrl or ⌘ + Shift + Z)">Redo</button>
         <button type="button" id="btn-clear" class="ghost">Clear notes</button>
       </div>
       <textarea id="exporttext" readonly hidden aria-label="The exercise as text"></textarea>
@@ -1446,9 +1448,14 @@
      each time; but they are kept in what is saved, so that going back puts
      the voices back as well as the notes.
 
+     Going back keeps what it left, so that it can be put back: the state a
+     step is taken back from goes on a second stack. That stack lasts until
+     the next thing you do on the staff, which makes the steps ahead of you
+     a different history, and they are dropped.
+
      Only the staff is covered. Changing the key or the progression starts a
      different piece, and the history goes with the one it belonged to. */
-  var UNDO_MAX = 200, undoStack = [], undoNow = null;
+  var UNDO_MAX = 200, undoStack = [], redoStack = [], undoNow = null;
   function stateKey(){
     var marks = Object.keys(state.marks).filter(function(k){ return state.marks[k]; }).sort()
       .map(function(k){ return k + "=" + state.marks[k]; }).join(",");
@@ -1463,28 +1470,39 @@
                return { slot:n.slot, step:n.step, staff:n.staff, voice:n.voice };
              }) };
   }
-  function resetHistory(){ undoStack = []; undoNow = null; }
+  function resetHistory(){ undoStack = []; redoStack = []; undoNow = null; }
   function settleHistory(){
     if (drag) return;
     if (!undoNow){ undoNow = snapshot(); return; }
     if (stateKey() === undoNow.key) return;
     undoStack.push(undoNow);
     if (undoStack.length > UNDO_MAX) undoStack.shift();
+    redoStack = [];                        /* a new step makes the ones ahead a different history */
     undoNow = snapshot();
+  }
+  function restore(to){
+    state.notes = to.notes.map(function(n){
+      return { slot:n.slot, step:n.step, staff:n.staff, voice:n.voice };
+    });
+    state.marks = {};
+    Object.keys(to.marks).forEach(function(k){ state.marks[k] = to.marks[k]; });
+    undoNow = to;
+    stopHearing();
+    render();
   }
   function undo(){
     if (drag) return;                      /* not while a note is in the hand */
     settleHistory();                       /* anything not yet seen is a step too */
     if (!undoStack.length) return;
-    var back = undoStack.pop();
-    state.notes = back.notes.map(function(n){
-      return { slot:n.slot, step:n.step, staff:n.staff, voice:n.voice };
-    });
-    state.marks = {};
-    Object.keys(back.marks).forEach(function(k){ state.marks[k] = back.marks[k]; });
-    undoNow = back;
-    stopHearing();
-    render();
+    redoStack.push(undoNow);
+    restore(undoStack.pop());
+  }
+  function redo(){
+    if (drag) return;
+    settleHistory();
+    if (!redoStack.length) return;
+    undoStack.push(undoNow);
+    restore(redoStack.pop());
   }
 
   function render(){
@@ -1552,6 +1570,7 @@
     checkBtn.hidden = false;
     checkBtn.disabled = !mine;
     undoBtn.disabled = !undoStack.length;
+    redoBtn.disabled = !redoStack.length;
     /* asking for an answer makes sense until the whole thing is right */
     showBtn.hidden = all && report && !report.errors && report.depth === depth;
     checkBtn.textContent = "Check";
@@ -1573,7 +1592,7 @@
 
   var chips = document.getElementById("chips");
   var checkBtn = document.getElementById("check"), checkHint = document.getElementById("checkhint");
-  var undoBtn = document.getElementById("btn-undo");
+  var undoBtn = document.getElementById("btn-undo"), redoBtn = document.getElementById("btn-redo");
   var showBtn = document.getElementById("showme");
   var playBtn = document.getElementById("play");
   playBtn.addEventListener("click", playProgression);
@@ -3821,15 +3840,20 @@
   /* ---------- toolbar --------------------------------------------------------- */
   document.getElementById("btn-clear").addEventListener("click", function(){ clearNotes(); });
   undoBtn.addEventListener("click", undo);
-  /* Ctrl or ⌘ + Z, from anywhere on the staff screen but a field that has
-     an undo of its own */
+  redoBtn.addEventListener("click", redo);
+  /* Ctrl or ⌘ + Z goes back and Shift with it goes forward, as does Ctrl + Y,
+     from anywhere on the staff screen but a field that has an undo of its
+     own */
   document.addEventListener("keydown", function(e){
-    if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || (e.key !== "z" && e.key !== "Z")) return;
+    if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+    var k = e.key.toLowerCase();
+    var back = k === "z" && !e.shiftKey, forward = (k === "z" && e.shiftKey) || (k === "y" && e.ctrlKey && !e.shiftKey);
+    if (!back && !forward) return;
     if (stage.hidden) return;
     var t = e.target && e.target.tagName;
     if (t === "TEXTAREA" || t === "SELECT" || (t === "INPUT" && e.target.type !== "range")) return;
     e.preventDefault();
-    undo();
+    if (back) undo(); else redo();
   });
 
   if (recall()) enterStage(); else drawSetup();
