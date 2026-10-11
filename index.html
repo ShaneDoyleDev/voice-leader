@@ -435,7 +435,7 @@
       <div class="checkbar">
         <button type="button" id="check" hidden>Check voice leading</button>
         <button type="button" id="showme" class="ghost" hidden
-                title="Write a correct voicing for the chord you are on, in place of what is there">Show me one</button>
+                title="Write a correct voicing for the chord you are on, in place of what is there">Assist</button>
         <p id="checkhint"></p>
       </div>
     </div>
@@ -3296,7 +3296,7 @@
     if (steps.length) hearSteps(steps);
   }
 
-  /* ---------- show me one -------------------------------------------------
+  /* ---------- assist -------------------------------------------------
      The checker knows every rule; turned round, it can answer as well as
      mark. The search is small enough to be exhaustive — the bass takes any
      tone of the chord, the voices above it any tone within reach of each
@@ -3533,7 +3533,7 @@
   function flashShow(word){
     var b = document.getElementById("showme");
     b.textContent = word;
-    setTimeout(function(){ b.textContent = "Show me one"; }, 1800);
+    setTimeout(function(){ b.textContent = "Assist"; }, 1800);
   }
   document.getElementById("showme").addEventListener("click", function(){
     var slot = firstWanting();
