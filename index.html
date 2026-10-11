@@ -82,6 +82,12 @@
   }
   .row{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
   .row .spacer{flex:1 1 auto}
+  .rowlabel{
+    font-size:11px; font-weight:600; letter-spacing:.16em; text-transform:uppercase;
+    color:var(--ink-soft); margin-right:4px;
+  }
+  .rownote{font-size:12px; color:var(--ink-soft)}
+  .timerow button{font-family:"Spectral",Georgia,serif; font-size:15px; letter-spacing:.04em}
 
   button{
     font:500 13px/1 "IBM Plex Sans", sans-serif;
@@ -145,6 +151,9 @@
     margin-top:2px; font-style:italic; font-size:9.5px; letter-spacing:.03em;
   }
   .seq .slot:hover{border-color:var(--accent)}
+  .seq .bar{                             /* a bar line between the chords of one bar and the next */
+    align-self:stretch; width:0; margin:2px 3px; border-left:2px solid var(--rule);
+  }
   .seq .none{
     align-self:center; margin:0 4px;
     color:var(--ink-soft); font-style:italic; font-size:13px;
@@ -395,6 +404,12 @@
       <div class="numerals" id="numerals"></div>
       <div class="seq" id="seq"></div>
       <p class="keyline" id="progline"></p>
+      <div class="row timerow" role="group" aria-label="Time signature">
+        <span class="rowlabel">Time</span>
+        <button type="button" id="time-4" aria-pressed="true" title="Four beats to the bar">4/4</button>
+        <button type="button" id="time-3" aria-pressed="false" title="Three beats to the bar">3/4</button>
+        <span class="rownote" id="timenote"></span>
+      </div>
       <div class="row">
         <button type="button" id="btn-seventh" aria-pressed="false">Sevenths</button>
         <button type="button" id="btn-generate"
@@ -551,7 +566,7 @@
   /* marks[slot + ":" + tone] is how many times you have ticked that tone of
      that chord off above the staff: one for used, two for doubled. They are
      yours, not the app's — nothing here counts your notes for you. */
-  var state = { mode:"major", tonic:"C", chords:[1,4,5,1], notes:[], marks:{}, live:"" };
+  var state = { mode:"major", tonic:"C", chords:[1,4,5,1], notes:[], marks:{}, live:"", meter:4 };
 
   function keyAcc(){
     var list = KEYS[state.mode], i;
@@ -761,9 +776,14 @@
   }
 
   /* horizontal position of each chord, cleared of the key signature */
+  /* The time signature stands after the key signature and takes its width
+     out of the staff before the first chord. Every chord is a crotchet, one
+     to a beat, so the signature says how many chords make a bar: four, or
+     three. */
+  var TIME_W = 24;
   var SLOT_X = [];
   function layoutSlots(){
-    var n = state.chords.length, first = SIG_X + sigWidth(S) + 46, last = CANVAS - 62, xs = [], i;
+    var n = state.chords.length, first = SIG_X + sigWidth(S) + TIME_W + 46, last = CANVAS - 62, xs = [], i;
     if (n === 1) return [(first + last) / 2];
     var gap = Math.min((last - first) / (n - 1), 108);
     var start = first + ((last - first) - gap * (n - 1)) / 2;
@@ -787,7 +807,7 @@
      columns and ran one chord's tone letters into the next one's. */
   var MIN_UNIT_PX = 7.5 / HALF;          /* what a half-step must not go under */
   function canvasFor(n){
-    return Math.max(640, Math.round(SIG_X + sigWidth(S) + 46 + 108 * (n - 1) + 62));
+    return Math.max(640, Math.round(SIG_X + sigWidth(S) + TIME_W + 46 + 108 * (n - 1) + 62));
   }
   function fitStaff(){
     CANVAS = canvasFor(Math.max(1, state.chords.length));
@@ -999,6 +1019,28 @@
       });
     }
 
+    /* the time signature, on both staves: the beats to the bar over the note
+       that gets one, each figure filling half the staff as an engraved one
+       does */
+    var tx = SIG_X + sigWidth(S) + TIME_W / 2;
+    ["treble","bass"].forEach(function(staff){
+      [[state.meter, 2], [4, 4]].forEach(function(fig){
+        var t = el("text",{x:tx, y:STAVES[staff].topY + fig[1] * S, "text-anchor":"middle",
+                           fill:"var(--ink)", "font-family":"Spectral, Georgia, serif",
+                           "font-size":35, "font-weight":600});
+        t.setAttribute("style", "font-variant-numeric:lining-nums");
+        t.textContent = fig[0];
+        layerStaff.appendChild(t);
+      });
+    });
+    /* and a bar line through both staves after each full bar, midway between
+       the last chord of one and the first of the next */
+    for (i = state.meter; i < state.chords.length; i += state.meter){
+      var bx = (SLOT_X[i - 1] + SLOT_X[i]) / 2;
+      if (!isFinite(bx)) continue;
+      layerStaff.appendChild(el("line",{x1:bx, y1:top, x2:bx, y2:bottom,
+                                        stroke:"var(--ink)", "stroke-width":1.2}));
+    }
   }
 
   /* The Roman numeral, with its figure, under each chord; the chord's tones
@@ -3250,7 +3292,22 @@
                     "<small class=\"fn\">" + FUNCTION[deg(degree)] + "</small>";
       b.addEventListener("click", function(){ state.chords.splice(i,1); drawSetup(); });
       seq.appendChild(b);
+      if ((i + 1) % state.meter === 0 && i + 1 < state.chords.length){
+        var bar = document.createElement("span");
+        bar.className = "bar";
+        bar.setAttribute("aria-hidden", "true");
+        seq.appendChild(bar);
+      }
     });
+  }
+  /* the progression as bars: "1 2 3 4 | 5 6" */
+  function barsText(){
+    var out = [], i;
+    for (i = 0; i < state.chords.length; i++){
+      if (i && i % state.meter === 0) out.push("|");
+      out.push(i + 1);
+    }
+    return out.join(" ");
   }
   function drawSetup(){
     /* keep the tonic legal when the mode flips */
@@ -3269,16 +3326,28 @@
     keyline.innerHTML = "Scale: <b>" + scaleText() + "</b> · Relative " + rel +
       (CIRCLE[circlePos()].maj.length > 1 ? " · Click the same wedge again for the other spelling." : "");
     begin.disabled = state.chords.length < 2;
+    document.getElementById("time-4").setAttribute("aria-pressed", String(state.meter === 4));
+    document.getElementById("time-3").setAttribute("aria-pressed", String(state.meter === 3));
+    var bars = Math.ceil(state.chords.length / state.meter), over = state.chords.length % state.meter;
+    document.getElementById("timenote").textContent = !state.chords.length ? "A chord to a beat."
+      : "A chord to a beat: " + bars + (bars === 1 ? " bar" : " bars") +
+        (over ? ", the last with " + over + (over === 1 ? " beat" : " beats") + " in it." : ".");
     startnote.textContent = state.chords.length < 2
       ? "Pick at least two chords."
       : state.chords.length + " chords — " + state.chords.map(numeralOf).join(" – ") +
-        " in " + keyName() + ".";
+        " in " + keyName() + ", " + state.meter + "/4.";
     remember();
   }
 
   document.getElementById("btn-seventh").addEventListener("click", function(){
     sevenths = !sevenths;
     drawSetup();
+  });
+  [4, 3].forEach(function(beats){
+    document.getElementById("time-" + beats).addEventListener("click", function(){
+      state.meter = beats;
+      drawSetup();
+    });
   });
   document.getElementById("btn-generate").addEventListener("click", function(){
     state.chords = makeFunctional(sevenths);
@@ -3917,6 +3986,7 @@
     out.push("A four-part writing exercise, from Voice Leader.");
     out.push("");
     out.push("Key: " + keyName() + " (" + sigText() + ")");
+    out.push("Time: " + state.meter + "/4, a chord to a beat. Bars: " + barsText());
     out.push("Progression: " + state.chords.map(numeralOf).join(" \u2013 "));
     out.push("");
     state.chords.forEach(function(chord, slot){
@@ -4026,7 +4096,7 @@
         box = JSON.stringify({
           v:KEEP_V, mode:state.mode, tonic:state.tonic, chords:state.chords,
           live:state.live, marks:state.marks,
-          staged:!stage.hidden, sevenths:sevenths, tempo:+tempo.value,
+          staged:!stage.hidden, sevenths:sevenths, tempo:+tempo.value, meter:state.meter,
           notes:state.notes.map(function(n){
             return { slot:n.slot, step:n.step, staff:n.staff };
           })
@@ -4048,6 +4118,7 @@
     if (!was.chords.every(function(c){
           return c === Math.floor(c) && c >= 1 && c <= DEGREES.length * 2; })) return false;
     if (was.live != null && typeof was.live !== "string") return false;
+    if (was.meter != null && was.meter !== 3 && was.meter !== 4) return false;
     if (!Array.isArray(was.notes)) return false;
     var perSlot = {}, perPlace = {}, i, n, at;
     for (i = 0; i < was.notes.length; i++){
@@ -4086,6 +4157,7 @@
       return { slot:n.slot, step:n.step, staff:n.staff };
     });
     sevenths = !!was.sevenths;
+    state.meter = was.meter === 3 ? 3 : 4;         /* sessions from before there was a choice are in four */
     if (was.tempo >= +tempo.min && was.tempo <= +tempo.max){
       tempo.value = was.tempo;
       tempoOut.textContent = tempo.value + " bpm";
