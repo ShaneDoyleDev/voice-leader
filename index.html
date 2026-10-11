@@ -1816,6 +1816,16 @@
   /* The cadential six-four is the tonic's second inversion standing in front
      of the dominant, over a bass that does not move. Any other six-four over
      a held bass is something else, and is not asked to resolve like one. */
+  /* How much weight a beat carries, for comparing one with the next. In four
+     the first is strongest and the third next; in three the first is
+     strongest and the second outweighs the third, which is why a cadential
+     six-four may stand on the second beat of a bar of three and resolve on
+     the last. The numbers mean nothing but their order. */
+  function beatStrength(slot){
+    var beat = slot % state.meter;
+    return state.meter === 4 ? [3, 1, 2, 1][beat] : [3, 2, 1][beat];
+  }
+  function beatName(slot){ return "beat " + (slot % state.meter + 1); }
   function isCadential(chord, next){
     return !hasSeventh(chord) && deg(chord) === 1 && deg(next) === 5;
   }
@@ -2127,10 +2137,26 @@
                 : !stepped ? null
                 : (inBy == null || inBy * outBy > 0) ? "A passing six-four"
                 : "A neighbouring six-four";
-        if (use)
+        /* A cadential six-four leans on the dominant it resolves to, and a
+           thing that leans has to come first and heavier: it stands on a
+           stronger beat than its resolution. On the weaker of the two it is
+           heard the other way about, as the dominant arriving early and the
+           tonic dangling off the front of it. */
+        if (use === "A cadential six-four" && beatStrength(slot) <= beatStrength(slot + 1))
+          add("error", "A cadential six-four on the weaker beat: it stands on " + beatName(slot) +
+              " and resolves on " + beatName(slot + 1) +
+              (Math.floor((slot + 1) / state.meter) > Math.floor(slot / state.meter)
+                 ? " of the next bar" : "") +
+              ", which is the stronger. It leans on the dominant, so it takes the stronger " +
+              "beat of the two \u2014 " + (state.meter === 4
+                 ? "the first or the third of a bar of four."
+                 : "the first or the second of a bar of three."), "weaker beat");
+        else if (use)
           add("ok", use + " \u2014 the bass " +
               (held ? "holds under what follows" : "steps in and steps out") +
-              ", which is what a second inversion is for.");
+              (use === "A cadential six-four"
+                 ? ", and it stands on " + beatName(slot) + ", the stronger of the two."
+                 : ", which is what a second inversion is for."));
         else
           add("caution", "The bass leaps " + (before && Math.abs(inBy) > 1 ? "into" : "out of") +
               " this six-four: " + (before ? before.name + " \u2013 " : "") + low.name +
