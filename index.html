@@ -126,21 +126,6 @@
     color:var(--ink-soft); letter-spacing:.02em;
   }
 
-  .drills{display:flex;flex-wrap:wrap;gap:8px}
-  .drills button{
-    flex:1 1 220px; text-align:left;
-    font:500 14px/1.1 "Spectral",Georgia,serif; padding:11px 14px;
-  }
-  .drills button small{
-    display:block; margin-top:4px;
-    font:400 11px/1.35 "IBM Plex Sans",sans-serif; color:var(--ink-soft);
-  }
-  .task{                                 /* what a drill is asking for */
-    margin:0; padding:11px 14px; border-bottom:1px solid var(--line);
-    font-size:13px; color:var(--ink-soft);
-  }
-  .task b{color:var(--ink);font-weight:600}
-
   .seq{
     display:flex; flex-wrap:wrap; align-items:stretch; gap:6px;
     min-height:62px; padding:8px;
@@ -343,7 +328,6 @@
     button{min-height:44px; padding:11px 14px; font-size:14px}
     .numerals{gap:8px}
     .numerals button{min-height:54px; padding:9px 14px; font-size:18px}
-    .drills button{min-height:64px}
     .seq{padding:10px}
     .seq .slot{min-height:52px; padding:8px 14px}
     .start button.go{min-height:48px; padding:13px 22px}
@@ -420,17 +404,6 @@
       <p id="startnote"></p>
     </div>
 
-    <div class="field">
-      <h2>Exercises</h2>
-      <div class="drills">
-        <button type="button" id="drill-bass">Figured bass
-          <small>A bass line is written for you — add the tenor, alto and soprano above it.</small></button>
-        <button type="button" id="drill-sop">Harmonise a melody
-          <small>A soprano line is written for you — set the alto, tenor and bass under it.</small></button>
-      </div>
-      <p class="keyline">The key and the progression come with it. The given voice is fixed on the
-        staff; everything else is yours to write, and the checklist grades it the same way.</p>
-    </div>
   </section>
 
   <!-- ---------- staff ---------- -->
@@ -439,12 +412,10 @@
       <h2 id="stagekey"></h2>
       <span class="prog" id="stageprog"></span>
       <span class="spacer"></span>
-      <button type="button" class="ghost" id="again" hidden>Reroll exercise</button>
       <button type="button" class="ghost" id="edit">Change key or progression</button>
     </div>
 
     <div class="panel" style="margin-top:12px">
-      <p class="task" id="stagetask" hidden></p>
       <div class="staffwrap" id="staffwrap" tabindex="0" role="application"
            aria-label="Grand staff. Arrow keys move the cursor, Enter places or removes a note.">
         <svg id="staff" viewBox="0 0 640 276" aria-hidden="true"></svg>
@@ -562,7 +533,7 @@
   /* marks[slot + ":" + tone] is how many times you have ticked that tone of
      that chord off above the staff: one for used, two for doubled. They are
      yours, not the app's — nothing here counts your notes for you. */
-  var state = { mode:"major", tonic:"C", chords:[1,4,5,1], notes:[], marks:{}, live:"", drill:null };
+  var state = { mode:"major", tonic:"C", chords:[1,4,5,1], notes:[], marks:{}, live:"" };
 
   function keyAcc(){
     var list = KEYS[state.mode], i;
@@ -694,22 +665,6 @@
     return a === 0 ? "natural" : a === 1 ? "sharp" : a === 2 ? "dblsharp" : "flat";
   }
 
-  /* ---------- drills ------------------------------------------------------
-     A drill writes one voice for you and asks for the other three, the way
-     four-part writing is actually taught. Nothing downstream changes: the
-     figure is read off whatever is lowest, and the checklist grades the
-     answer exactly as it grades free voicing. */
-  function pick(list){ return list[Math.floor(Math.random() * list.length)]; }
-  /* where each degree usually goes next — no degree repeats itself, and the
-     progression is closed with V–I so there is a cadence to write into */
-  var NEXT = { 1:[2,3,4,5,6], 2:[5,7], 3:[4,6], 4:[1,2,5], 5:[1,6], 6:[2,4,5], 7:[1] };
-  function makeProgression(){
-    var len = 5 + Math.floor(Math.random() * 2), out = [1];
-    while (out.length < len - 2) out.push(pick(NEXT[out[out.length - 1]]));
-    if (out[out.length - 1] !== 5) out.push(5);
-    out.push(1);
-    return out;
-  }
   /* ---------- progressions that mean something ----------------------------
      Functional harmony sorts the seven chords of a key by what they do rather
      than what they are. Tonic chords are home and rest there: I, and vi and
@@ -785,161 +740,6 @@
   var SEVENTH_ODDS = { 1:0, 2:0.7, 3:0.4, 4:0.3, 5:1, 6:0.4, 7:1 };
   function seventhOn(degree){
     return degree + (Math.random() < SEVENTH_ODDS[degree] ? 7 : 0);
-  }
-
-  function makeKey(){
-    var mode = Math.random() < 0.6 ? "major" : "minor";
-    var plain = KEYS[mode].filter(function(k){ return Math.abs(k[1]) <= 4; });
-    return { mode:mode, tonic:pick(plain)[0] };
-  }
-  /* the same note priced in semitones under a given chord, so a line can
-     tell an augmented second from a minor third before it writes one */
-  function midiUnder(chord, step){
-    var l = step % 7;
-    return (Math.floor(step / 7) + 1) * 12 + SEMIS[l] + alterFor(chord, l);
-  }
-  /* An interval no line should be asked to sing: anything augmented, and
-     anything diminished. In minor these are close at hand — the sixth
-     degree and the raised leading tone are an augmented second apart — so
-     a generated line has to know about them or it will hand you a fault of
-     its own making in a voice you are not allowed to change. */
-  function awkward(fromStep, fromChord, toStep, toChord){
-    if (fromStep === toStep) return false;
-    var up = toStep > fromStep;
-    var lo = up ? fromStep : toStep, hi = up ? toStep : fromStep;
-    var loMidi = midiUnder(up ? fromChord : toChord, lo);
-    var hiMidi = midiUnder(up ? toChord : fromChord, hi);
-    var dia = hi - lo, off = (hiMidi - loMidi) - (SEMIS[dia % 7] + 12 * Math.floor(dia / 7));
-    var perfect = (dia % 7 === 0 || dia % 7 === 3 || dia % 7 === 4);
-    return off > 0 || (perfect ? off < 0 : off < -1);
-  }
-  function stepsFor(letter, lo, hi){
-    var out = [], step;
-    for (step = lo; step <= hi; step++) if (step % 7 === letter) out.push(step);
-    return out;
-  }
-  /* A line needs a shape as well as smooth joins, or it wanders around the
-     same three notes and sounds like nothing. Each line is given a contour —
-     an arch, a climb, a descent into the cadence — as a target register for
-     every chord in turn. The chord still decides which notes are available;
-     the contour decides which of them the line is reaching for. */
-  var SHAPES = [
-    function(t){ return Math.sin(Math.PI * t); },        /* up to a high point, then away */
-    function(t){ return t; },                            /* a climb */
-    function(t){ return 1 - t; },                        /* a descent into the close */
-    function(t){ return Math.sin(Math.PI * t * 0.5); }   /* a rise that stays up */
-  ];
-  function contour(n, floor, span){
-    var shape = pick(SHAPES), out = [], i;
-    for (i = 0; i < n; i++) out.push(floor + span * shape(n < 2 ? 0 : i / (n - 1)));
-    return out;
-  }
-  /* A letter can appear only once within a voice's range — the bass has a
-     single D to choose from, the soprano a single B — so a line can walk
-     itself into a corner where the one note left is a seventh away. Every
-     note therefore looks a chord ahead and will not stand where the next one
-     cannot be reached by a decent interval. */
-  function reachable(step, next, lo, hi, leap){
-    var ok = false;
-    next.forEach(function(l){
-      stepsFor(l, lo, hi).forEach(function(s){ if (Math.abs(s - step) <= leap) ok = true; });
-    });
-    return ok;
-  }
-  function toneNear(letters, lo, hi, target, next, leap){
-    var cands = [], open;
-    letters.forEach(function(l){ cands = cands.concat(stepsFor(l, lo, hi)); });
-    if (next){
-      open = cands.filter(function(s){ return reachable(s, next, lo, hi, leap); });
-      if (open.length) cands = open;
-    }
-    return cands.reduce(function(a, b){
-      return Math.abs(b - target) < Math.abs(a - target) ? b : a;
-    });
-  }
-  /* the next note of a written line: a step or two is likeliest, a leap
-     beyond a sixth never happens, a repeat is allowed but rare, and of the
-     notes that qualify the one nearest the contour is likeliest of all */
-  function nextInLine(prev, letters, lo, hi, leap, target, next, avoid, cameFrom){
-    var cands = [];
-    letters.forEach(function(l){ cands = cands.concat(stepsFor(l, lo, hi)); });
-    if (!cands.length) return prev;
-    /* an awkward interval is dropped outright, so long as dropping it
-       leaves the line anything at all to choose from */
-    if (avoid){
-      var plain = cands.filter(function(s){ return !avoid(s); });
-      if (plain.length) cands = plain;
-    }
-    /* and a line that has just leapt would rather turn back than press on */
-    var leapt = (cameFrom != null && Math.abs(prev - cameFrom) >= 4)
-              ? (prev > cameFrom ? 1 : -1) : 0;
-    var scored = cands.map(function(step){
-      var d = Math.abs(step - prev);
-      var w = d === 0 ? 0.5 : d <= 2 ? 3 : d <= 4 ? 1.3 : d <= leap ? 0.4 : 0;
-      if (w && target != null) w *= Math.pow(0.55, Math.abs(step - target));   /* pull to the shape */
-      if (w && leapt){
-        var dir = step === prev ? 0 : step > prev ? 1 : -1;
-        w *= (dir === -leapt && d === 1) ? 3 : dir === leapt ? 0.2 : 1;
-      }
-      return { step:step, w:w };
-    }).filter(function(c){ return c.w > 0; });
-    if (next){                        /* not into a corner, if there is a way round it */
-      var open = scored.filter(function(c){ return reachable(c.step, next, lo, hi, leap); });
-      if (open.length) scored = open;
-    }
-    if (!scored.length)
-      return cands.reduce(function(a,b){ return Math.abs(b-prev) < Math.abs(a-prev) ? b : a; });
-    var total = scored.reduce(function(t,c){ return t + c.w; }, 0), r = Math.random() * total, i;
-    for (i = 0; i < scored.length; i++){ r -= scored[i].w; if (r <= 0) return scored[i].step; }
-    return scored[scored.length - 1].step;
-  }
-  var BASS_LO = 17, BASS_HI = 28;        /* F2 to C4 — the bass voice’s working range */
-  /* C4 to F5 — a step short of the soprano’s top, so a leading tone always
-     has the one note above it that it is obliged to rise to */
-  var SOP_LO  = 28, SOP_HI  = 38;
-  /* Every chord stands on its own root. Inversions are written freely
-     anywhere else; a given bass keeps to the root so that this exercise
-     stays about the three voices above it rather than about reading a
-     figure off the page. */
-  function makeBass(chords){
-    /* the roots are fixed, so the shape is carried by which octave each one
-       is written in — the line still rises and falls as a whole */
-    var aim = contour(chords.length, 18 + Math.floor(Math.random() * 3), 6);
-    var line = [], prev = null, prevDegree = null, before = null;
-    chords.forEach(function(degree, i){
-      var letter = chordLetters(degree)[0];
-      var next = i + 1 < chords.length ? [chordLetters(chords[i + 1])[0]] : null;
-      var step = prev == null
-        ? toneNear([letter], BASS_LO, BASS_HI, aim[0], next, 5)
-        : nextInLine(prev, [letter], BASS_LO, BASS_HI, 5, aim[i], next,
-            function(sp){ return awkward(prev, prevDegree, sp, degree); }, before);
-      line.push(step);
-      before = prev; prev = step; prevDegree = degree;
-    });
-    return line;
-  }
-  function makeSoprano(chords){
-    var aim = contour(chords.length, 29 + Math.floor(Math.random() * 3), 6);
-    var line = [], prev = null, prevDegree = null, before = null;
-    chords.forEach(function(degree, i){
-      var tones = chordLetters(degree), last = i === chords.length - 1, step;
-      /* the closing chord is written on its root alone, so it is the one
-         that can be out of reach; the rest offer all three tones */
-      var next = last ? null
-        : (i + 2 === chords.length ? [chordLetters(chords[i + 1])[0]]
-                                   : chordLetters(chords[i + 1]));
-      if (prev == null){
-        step = toneNear(tones, SOP_LO, SOP_HI, aim[0], next, 4);
-      } else if (prevDegree === 5 && prev % 7 === leadingLetter() && degree === 1){
-        step = prev + 1;            /* a leading tone in the soprano has one move: up a step */
-      } else {
-        step = nextInLine(prev, last ? [tones[0]] : tones, SOP_LO, SOP_HI, 4, aim[i], next,
-          function(sp){ return awkward(prev, prevDegree, sp, degree); }, before);
-      }
-      line.push(step);
-      before = prev; prev = step; prevDegree = degree;
-    });
-    return line;
   }
 
   /* horizontal position of each chord, cleared of the key signature */
@@ -1393,15 +1193,14 @@
   function clearNotes(slot){
     /* The ticks above the staff go with the notes: clearing a chord is
        starting it again, and a plan for a voicing you have abandoned is
-       worse than none. A drill's given voice stays put, though — it is not
-       yours to clear. */
+       worse than none. */
     var j;
     if (slot == null){
       /* an empty staff is the start again: the ticks go with the notes */
       state.marks = {};
     } else for (j = 0; j < 3; j++) delete state.marks[slot + ":" + j];
     var going = state.notes.filter(function(n){
-      return !n.given && (slot == null || n.slot === slot);
+      return slot == null || n.slot === slot;
     });
     state.notes = state.notes.filter(function(n){ return going.indexOf(n) === -1; });
     driftAway(going);
@@ -1537,10 +1336,10 @@
        being written — the staff stays plain notation until it is checked,
        and editing anything clears the report and the red with it. */
     if (report && n.slot < report.depth && !isChordTone(n)) return "var(--wrong)";
-    var base = n.given ? "--rule" : "--ink", t = tintOf(n.slot);
-    return t <= 0 ? "var(" + base + ")"
+    var t = tintOf(n.slot);
+    return t <= 0 ? "var(--ink)"
          : t >= 1 ? "var(--accent)"
-         : mixed(base, "--accent", t);
+         : mixed("--ink", "--accent", t);
   }
 
   function noteGroup(note, opts){
@@ -1592,11 +1391,9 @@
     return n;
   }
   function slotFull(slot){ return slotCount(slot) >= MAX_VOICES; }
-  /* what the cross would actually take off: a drill's given voice stays */
+  /* whether there is anything in the chord for the cross to take off */
   function written(slot){
-    for (var i = 0; i < state.notes.length; i++)
-      if (state.notes[i].slot === slot && !state.notes[i].given) return true;
-    return false;
+    return slotCount(slot) > 0;
   }
 
   function indexAt(slot, step){
@@ -1691,7 +1488,7 @@
     /* Checking is never withheld. It reads whatever is written, whether or
        not a chord has all its notes and whether or not the chords before it
        are right; the only thing it needs is something of yours to read. */
-    var mine = state.notes.some(function(n){ return !n.given; });
+    var mine = state.notes.length > 0;
     checkBtn.hidden = false;
     checkBtn.disabled = !mine;
     /* asking for an answer makes sense until the whole thing is right */
@@ -2096,7 +1893,7 @@
      you have put a note in. What it could not look at it says so. */
   function touchedDepth(){
     var last = -1;
-    state.notes.forEach(function(n){ if (!n.given && n.slot > last) last = n.slot; });
+    state.notes.forEach(function(n){ if (n.slot > last) last = n.slot; });
     return last + 1;
   }
   function chordsText(slots){
@@ -3000,18 +2797,12 @@
     var t = targetAt(p);
     return topAt(t.slot, t.step);
   }
-  /* a given note answers to nothing: it cannot be grabbed, dragged or
-     double-clicked away, and a click on it places nothing either */
-  function hitFree(p){
-    var i = hitNote(p);
-    return (i > -1 && state.notes[i].given) ? -1 : i;
-  }
 
   function setCursor(p){
     var m = markHit(p);
     svg.style.cursor = drag ? "grabbing"
       : m ? (m.idx > -1 ? "pointer" : "default")
-      : hitNote(p) > -1 ? (hitFree(p) > -1 ? "grab" : "default")   /* a note answers first */
+      : hitNote(p) > -1 ? "grab"   /* a note answers first */
       : cueHit(p) != null ? "pointer" : "crosshair";
   }
 
@@ -3061,7 +2852,7 @@
   var HOLD_MS = 520, holdTimer = null;
   function endHold(){ if (holdTimer){ clearTimeout(holdTimer); holdTimer = null; } }
   svg.addEventListener("pointerdown", function(e){
-    var p = aim(e), hit = hitFree(p);
+    var p = aim(e), hit = hitNote(p);
     press = { id:e.pointerId, x:p.x, y:p.y, done:false };
     /* capture keeps a drag alive past the edge of the staff, but it is not
        worth the gesture: a stale pointer id throws, and the press is already
@@ -3176,7 +2967,6 @@
       case "ArrowRight": cursor.slot = clamp(cursor.slot + 1, 0, state.chords.length - 1); break;
       case "Enter": case " ":
         i = indexAt(cursor.slot, cursor.step);
-        if (i > -1 && state.notes[i].given) break;      /* not yours to take off */
         if (i > -1) state.notes.splice(i, 1);
         else if (!slotFull(cursor.slot)){
           state.notes.push({slot:cursor.slot, step:cursor.step, staff:cursor.staff});
@@ -3185,7 +2975,7 @@
         break;
       case "Backspace": case "Delete":
         i = indexAt(cursor.slot, cursor.step);
-        if (i > -1 && !state.notes[i].given) state.notes.splice(i, 1);
+        if (i > -1) state.notes.splice(i, 1);
         break;
       default: handled = false;
     }
@@ -3387,12 +3177,6 @@
   document.getElementById("undo").addEventListener("click", function(){ state.chords.pop(); drawSetup(); });
   document.getElementById("clearprog").addEventListener("click", function(){ state.chords = []; drawSetup(); });
 
-  var TASK = {
-    bass:"<b>The bass is given.</b> Write the tenor, alto and soprano above it. The given bass " +
-         "stands on the root of every chord, so nothing is figured \u2014 read the numerals.",
-    soprano:"<b>The soprano is given.</b> Harmonise it \u2014 alto, tenor and bass under each " +
-            "note. The figures follow whatever bass you write."
-  };
   function enterStage(){
     fitStaff();
     SLOT_X = layoutSlots();
@@ -3401,50 +3185,12 @@
     cursor = { slot:0, step:30, staff:"treble" };
     document.getElementById("stagekey").textContent = keyName();
     document.getElementById("stageprog").textContent = state.chords.map(numeralOf).join(" – ");
-    var task = document.getElementById("stagetask");
-    task.hidden = !state.drill;
-    if (state.drill) task.innerHTML = TASK[state.drill];
-    document.getElementById("again").hidden = !state.drill;
     audio();                 /* decode the samples while the staff is drawn */
     setup.hidden = true;
     stage.hidden = false;
     drawStaff();
     render();
     wrap.focus({preventScroll:true});
-  }
-  /* A drill: a key, a progression and one voice already on the staff. */
-  /* An exercise is dealt only if it can be answered. A given line is written
-     to be melodic and to sit on the chords, and says nothing about the three
-     voices that have to go with it; some of the lines it can produce leave no
-     way through them at all, which the solver finds out only when it is asked
-     for an answer and has none to give. So the line is tried first, and
-     redealt where nothing that passes every rule can be written against it. */
-  var DEAL_CLEAN_TRIES = 12, DEAL_TRIES = 40;
-  function dealDrill(kind){
-    var key = makeKey();
-    state.mode = key.mode;
-    state.tonic = key.tonic;
-    state.chords = makeProgression();
-    state.drill = kind;
-    var line = kind === "bass" ? makeBass(state.chords) : makeSoprano(state.chords);
-    state.notes = line.map(function(step, slot){
-      return { slot:slot, step:step, staff:(kind === "bass" ? "bass" : "treble"), given:true };
-    });
-  }
-  function startDrill(kind){
-    var tries = 0, ok;
-    state.marks = {};
-    do {
-      dealDrill(kind);
-      updateVoices();
-      tries++;
-      /* an exercise that has a clean answer is better than one that has not:
-         ask for that first, and settle for one that can be answered with a
-         caution or two only when a run of deals has not turned one up */
-      ok = cleanPath(0, tries <= DEAL_CLEAN_TRIES ? 0 : PATH_ALLOW[PATH_ALLOW.length - 1]);
-    } while (!ok && tries < DEAL_TRIES);
-    pathDead = null;
-    enterStage();
   }
   /* a rotation or a window drag changes what the staff can have */
   var refit = null;
@@ -3459,14 +3205,10 @@
     }, 120);
   });
 
-  document.getElementById("drill-bass").addEventListener("click", function(){ startDrill("bass"); });
-  document.getElementById("drill-sop").addEventListener("click", function(){ startDrill("soprano"); });
-  document.getElementById("again").addEventListener("click", function(){ startDrill(state.drill); });
-
   begin.addEventListener("click", function(){
     var sig = state.mode + "|" + state.tonic + "|" + state.chords.join(",");
     if (sig !== state.live){                    /* a changed setup starts clean */
-      state.notes = []; state.marks = {}; state.drill = null;
+      state.notes = []; state.marks = {};
     }
     enterStage();
   });
@@ -3642,18 +3384,9 @@
      nothing can follow any of them the smoothest is given anyway — the wall
      is then real, and worth meeting. */
   var SOLVE_LOOKAHEAD = 24, SOLVE_TRIES = 400;
-  /* Every way of voicing the chord, smoothest first, with a given line kept
-     as the voice it was dealt as. A bass exercise's bass is the lowest note
-     of every chord and a melody's soprano the highest; let the search lay it
-     among the inner voices instead and the given bass stops being the bass —
-     another voice goes under it, the chord turns into an inversion nobody
-     asked for, and the exercise is no longer the one that was set. */
-  function givenAt(slot, from){
-    return from.filter(function(n){ return n.slot === slot && n.given; });
-  }
-  function candidatesFor(slot, from){
+  /* Every way of voicing the chord, smoothest first. */
+  function candidatesFor(slot){
     var tones = chordLetters(state.chords[slot]);
-    var given = givenAt(slot, from);
     var prev = slot > 0 ? notesIn(slot - 1) : [], cands = [];
     tonePitches(slot, 16, 28).forEach(function(b){
       /* voices may meet: a complete seventh chord resolving to its tonic can
@@ -3670,18 +3403,11 @@
     });
     cands.forEach(function(c){ c.cost = costOf(slot, c, prev, tones); });
     cands.sort(function(x, y){ return x.cost - y.cost; });
-    return cands.filter(function(c){
-      if (!given.length) return true;
-      return state.drill === "bass" ? c[0] === given[0].step
-           : state.drill === "soprano" ? c[3] === given[0].step
-           : given.every(function(n){ return c.indexOf(n.step) > -1; });
-    });
+    return cands;
   }
-  function trialOf(slot, c, from){
-    var given = givenAt(slot, from);
+  function trialOf(slot, c){
     return c.map(function(step){
-      var mine = given.filter(function(n){ return n.step === step; })[0];
-      return mine || { slot:slot, step:step, staff: step >= 28 ? "treble" : "bass" };
+      return { slot:slot, step:step, staff: step >= 28 ? "treble" : "bass" };
     });
   }
 
@@ -3689,24 +3415,21 @@
      the way through. Looking a chord ahead catches the chord that cannot be
      followed, but not the one that can be followed only into a corner two
      chords on, and a fault met there is met when nothing before it can any
-     longer be changed. So the search first tries the rest of the exercise:
+     longer be changed. So the search first tries the rest of the progression:
      the smoothest voicing of every remaining chord, backing out the moment
      one of them would draw an error or a caution, until a path is found that
      is clean from here to the last chord. Its first chord is the answer.
-     It is given a budget, since an exercise that has no clean answer — the
-     given line can force one — would otherwise be searched for ever; and a
-     failure is remembered, so the next press does not pay for it again. */
+     It is given a budget, since a progression that has no clean answer would
+     otherwise be searched for ever; and a failure is remembered, so the next
+     press does not pay for it again. */
   var PATH_BUDGET = 500, PATH_WIDTH = 60, PATH_ALLOW = [0, 1, 2];
   var pathDead = null;
   function prefixSig(slot){
-    return state.notes.filter(function(n){ return n.slot < slot && !n.given; })
+    return state.notes.filter(function(n){ return n.slot < slot; })
       .map(function(n){ return n.slot + ":" + n.step; }).sort().join(",");
   }
-  function exerciseSig(){
-    return state.mode + "|" + state.tonic + "|" + state.chords.join(",") + "|" +
-           (state.drill || "") + "|" +
-           state.notes.filter(function(n){ return n.given; })
-             .map(function(n){ return n.slot + ":" + n.step; }).sort().join(",");
+  function progressionSig(){
+    return state.mode + "|" + state.tonic + "|" + state.chords.join(",");
   }
   function cleanPath(slot, allow){
     var n = state.chords.length, was = state.notes, nodes = 0, chosen = [];
@@ -3720,13 +3443,13 @@
       if (k === n) return true;
       lay();
       var tones = chordLetters(state.chords[k]);
-      var list = candidatesFor(k, was).slice(0, PATH_WIDTH), i, trial, rep;
+      var list = candidatesFor(k).slice(0, PATH_WIDTH), i, trial, rep;
       for (i = 0; i < list.length; i++){
         if (++nodes > PATH_BUDGET) return null;
         /* a six-four on the last chord has nothing after it to resolve into */
         if (k === n - 1 && !hasSeventh(state.chords[k]) && tones.indexOf(list[i][0] % 7) === 2)
           continue;
-        trial = trialOf(k, list[i], was);
+        trial = trialOf(k, list[i]);
         lay(trial);
         rep = runChecks(k + 1);
         if (rep.errors || rep.cautions > base + allow) continue;
@@ -3747,14 +3470,13 @@
 
   function solveChord(slot, quick){
     var tones = chordLetters(state.chords[slot]);
-    var given = state.notes.filter(function(n){ return n.slot === slot && n.given; });
     var kept = state.notes.filter(function(n){ return n.slot !== slot; });
     var prev = slot > 0 ? notesIn(slot - 1) : [];
     if (!quick){
       /* Clean all the way if that can be done; and where it cannot, with as
          few cautions as it can be done with, one more at a time. What has
-         already failed for this exercise is not tried again. */
-      var sig = exerciseSig(), level = 0, path, a;
+         already failed for this progression is not tried again. */
+      var sig = progressionSig(), level = 0, path, a;
       if (pathDead && pathDead.sig === sig && slot >= pathDead.slot &&
           prefixSig(pathDead.slot) === pathDead.prefix) level = pathDead.level;
       for (a = level; a < PATH_ALLOW.length; a++){
@@ -3770,10 +3492,10 @@
        that only this chord's own cautions count against a candidate */
     var was = state.notes, answer = null, fallback = null, grumbled = null;
     var base = runChecks(slot).cautions, looked = 0, rep, follow, own, i;
-    var cands = candidatesFor(slot, state.notes);
+    var cands = candidatesFor(slot);
     for (i = 0; i < cands.length && i < SOLVE_TRIES; i++){
       var c = cands[i];
-      var trial = trialOf(slot, c, was);
+      var trial = trialOf(slot, c);
       state.notes = kept.concat(trial);
       updateVoices();
       rep = runChecks(slot + 1);
@@ -3818,9 +3540,9 @@
     if (slot == null) return;
     var answer = solveChord(slot);
     if (!answer){ flashShow("Nothing fits"); render(); return; }
-    var going = state.notes.filter(function(n){ return n.slot === slot && !n.given; });
+    var going = state.notes.filter(function(n){ return n.slot === slot; });
     state.notes = state.notes.filter(function(n){ return going.indexOf(n) === -1; })
-                             .concat(answer.filter(function(n){ return !n.given; }));
+                             .concat(answer);
     driftAway(going);
     /* and then it is checked, like anything else written here. The notes
        have only this moment arrived, so they are read into voices first;
@@ -3944,10 +3666,8 @@
   /* ---------- picking the session up again --------------------------------
      A refresh, a closed tab, a phone that decided on its own to reload the
      page: none of them should cost you the chord you were in the middle of.
-     So the working state is kept — the key and the progression, every note
-     with a drill's given ones still marked as given, the ticks above the
-     staff, how far the frontier has opened, the tempo — and read back on the
-     next visit.
+     So the working state is kept — the key and the progression, every note,
+     the ticks above the staff, the tempo — and read back on the next visit.
 
      The checklist is not kept. It is a reading of the staff rather than a
      part of it, and it comes back the moment you press Proceed; storing a
@@ -3967,10 +3687,10 @@
       try {
         box = JSON.stringify({
           v:KEEP_V, mode:state.mode, tonic:state.tonic, chords:state.chords,
-          drill:state.drill, live:state.live, marks:state.marks,
+          live:state.live, marks:state.marks,
           staged:!stage.hidden, sevenths:sevenths, tempo:+tempo.value,
           notes:state.notes.map(function(n){
-            return { slot:n.slot, step:n.step, staff:n.staff, given:!!n.given };
+            return { slot:n.slot, step:n.step, staff:n.staff };
           })
         });
       } catch (e) { return; }
@@ -3989,7 +3709,6 @@
     if (!Array.isArray(was.chords) || was.chords.length > MAX_CHORDS) return false;
     if (!was.chords.every(function(c){
           return c === Math.floor(c) && c >= 1 && c <= DEGREES.length * 2; })) return false;
-    if (was.drill != null && was.drill !== "bass" && was.drill !== "soprano") return false;
     if (was.live != null && typeof was.live !== "string") return false;
     if (!Array.isArray(was.notes)) return false;
     var perSlot = {}, perPlace = {}, i, n, at;
@@ -4023,13 +3742,10 @@
     state.mode = was.mode;
     state.tonic = was.tonic;
     state.chords = was.chords.slice();
-    state.drill = was.drill || null;
     state.live = was.live || "";
     state.marks = was.marks || {};
     state.notes = was.notes.map(function(n){
-      var note = { slot:n.slot, step:n.step, staff:n.staff };
-      if (n.given) note.given = true;
-      return note;
+      return { slot:n.slot, step:n.step, staff:n.staff };
     });
     sevenths = !!was.sevenths;
     if (was.tempo >= +tempo.min && was.tempo <= +tempo.max){
