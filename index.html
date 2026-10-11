@@ -1197,13 +1197,10 @@
                      (!needsFifth(i) || count[tones[2]] > 0) &&
                      (tones.length < 4 || count[tones[3]] > 0);  /* fifth optional; the seventh is not */
 
-      /* a chord you have not reached yet is drawn faintly: it is where the
-         progression is going, not where you are */
-      var dim = locked(i) ? 0.32 : 1;
       var t = el("text",{x:SLOT_X[i], y:228, fill: complete ? "var(--accent)" : "var(--ink)",
                          "text-anchor":"middle", "font-family":"Spectral, Georgia, serif",
                          "font-size":16, "font-weight": complete ? 600 : 500,
-                         "letter-spacing":"0.04em", opacity:dim});
+                         "letter-spacing":"0.04em"});
       var fig = inversionOf(i);
       t.appendChild(document.createTextNode(
         fig == null ? numeralOf(degree) : numeralBase(degree)));
@@ -1221,14 +1218,14 @@
 
       /* a ground of its own under each chord's tones, so a row of them reads
          as one group to a chord rather than a line of letters */
-      var ground = el("rect",{y:2, height:31, rx:3, fill:"var(--chip)", opacity:dim});
+      var ground = el("rect",{y:2, height:31, rx:3, fill:"var(--chip)"});
       layerLabels.appendChild(ground);
       var letters = [], dots = [], size = MARK_BIG;
       tones.forEach(function(l, j){
         var on = markOf(i, j);
         var sp = el("text",{x:markX(i, j), y:MARK_Y, "text-anchor":"middle",
                             "font-family":"IBM Plex Sans, sans-serif", "font-size":size,
-                            "font-weight": on ? 600 : 400, opacity:dim,
+                            "font-weight": on ? 600 : 400,
                             fill: on ? "var(--accent)" : "var(--ink-soft)"});
         var hint = el("title",{});
         hint.textContent = on === 2 ? "Doubled \u2014 press to clear"
@@ -1239,7 +1236,7 @@
         letters.push(sp);
         dots.push(on === 2
           ? layerLabels.appendChild(el("circle",{cy:MARK_DOT_Y, r:2.2,
-                                                 fill:"var(--accent)", opacity:dim}))
+                                                 fill:"var(--accent)"}))
           : null);
       });
       rows.push({ slot:i, letters:letters, dots:dots, ground:ground });
@@ -1400,10 +1397,8 @@
        yours to clear. */
     var j;
     if (slot == null){
-      /* an empty staff is the start again: the ticks go, and so does the
-         ground won — the second chord is earned by checking the first */
+      /* an empty staff is the start again: the ticks go with the notes */
       state.marks = {};
-      open = 0;
     } else for (j = 0; j < 3; j++) delete state.marks[slot + ":" + j];
     var going = state.notes.filter(function(n){
       return !n.given && (slot == null || n.slot === slot);
@@ -1662,8 +1657,7 @@
     if (drag)
       layerGhost.appendChild(noteGroup(drag.note,{color:"var(--accent)", pop:false,
         name: touching ? nameAt(drag.note.slot, drag.note.step) : null}));
-    else if (focus && indexAt(focus.slot, focus.step) === -1 && !slotFull(focus.slot) &&
-             !locked(focus.slot))
+    else if (focus && indexAt(focus.slot, focus.step) === -1 && !slotFull(focus.slot))
       layerGhost.appendChild(noteGroup(focus,{color:"var(--accent)", opacity:0.55, pop:false,
         name: touching ? nameAt(focus.slot, focus.step) : null}));
 
@@ -1694,10 +1688,15 @@
     renderChips();
     renderReport();
     var depth = writtenDepth(), all = depth === state.chords.length;
-    checkBtn.hidden = depth < 1;
+    /* Checking is never withheld. It reads whatever is written, whether or
+       not a chord has all its notes and whether or not the chords before it
+       are right; the only thing it needs is something of yours to read. */
+    var mine = state.notes.some(function(n){ return !n.given; });
+    checkBtn.hidden = false;
+    checkBtn.disabled = !mine;
     /* asking for an answer makes sense until the whole thing is right */
     showBtn.hidden = all && report && !report.errors && report.depth === depth;
-    checkBtn.textContent = all ? "Check voice leading" : "Proceed";
+    checkBtn.textContent = "Check";
     /* Play stays up throughout, so a part-written progression can be heard;
        an empty chord simply passes in silence */
     playBtn.disabled = !state.notes.length;
@@ -1706,15 +1705,11 @@
       tintFrame = true;
       nextFrame(function(){ tintFrame = false; render(); });
     }
-    var wants = all ? null : wantsAt(depth);
+    var done = state.chords.filter(function(c, k){ return filled(k); }).length;
     checkHint.textContent =
       all ? "Doubling, spacing, crossing, the leading tone and parallels."
-      : slotCount(depth) === 0
-        ? (depth === 0 ? "Write the opening chord in all four voices \u2014 it names them for the rest."
-           : locked(depth) ? "Everything written so far. Nothing to fix and the next chord opens."
-           : "Write the next chord, then check again.")
-      : wants ? wants
-      : "Everything written so far. Nothing to fix and the next chord opens.";
+      : !mine ? "Write notes in any order, and check whenever you like \u2014 even part-way through a chord."
+      : done + " of " + state.chords.length + " chords complete. Check any time; it reads what is written.";
     remember();
   }
 
@@ -1724,10 +1719,9 @@
   var playBtn = document.getElementById("play");
   playBtn.addEventListener("click", playProgression);
   checkBtn.addEventListener("click", function(){
-    var depth = writtenDepth();
+    var depth = touchedDepth();
     if (depth < 1) return;
     report = runChecks(depth);
-    if (!report.errors) openTo(depth);      /* nothing to fix — the next chord is yours */
     reportKey = notesKey();
     flowAt = performance.now() - (reducedMotion() ? 1e6 : 0);
     render();          /* starts the lines drawing; renderReport alone would not */
@@ -2056,7 +2050,7 @@
   /* What the chord being written still wants, in as many words. Nothing on
      the staff is marked wrong any more, so a note outside the chord or a
      missing third would otherwise just leave the button quietly absent. */
-  function wantsAt(slot){
+  function wantsAt(slot, leaveStray){
     if (slot == null || slot >= state.chords.length || filled(slot)) return null;
     var degree = state.chords[slot], tones = chordLetters(degree);
     var notes = notesIn(slot), seen = {}, stray = null, i, l;
@@ -2066,7 +2060,7 @@
       if (tones.indexOf(l) < 0){ if (stray == null) stray = l; }
       else seen[l] = (seen[l] || 0) + 1;
     }
-    if (stray != null)
+    if (stray != null && !leaveStray)
       return name + " has a note that is not one of its tones: " + LETTERS[stray] +
              " is not in " + spell(degree) + ".";
     if (notes.length < 3)
@@ -2087,19 +2081,21 @@
       return "The opening chord needs all four voices \u2014 it names them for the rest.";
     return null;
   }
-  /* Four-part writing is done a chord at a time, and a mistake in the second
-     chord is worth knowing about before the fifth is written on top of it.
-     So the checklist runs on whatever is written so far, from the opening
-     chord on, and the progression opens one chord at a time: the next is
-     available once everything before it has come back with nothing to fix.
-     Even the first chord is checked on its own — its doubling, spacing and
-     crossing are worth knowing before a second chord is written against it.
-     The frontier only ever moves forward — going back to revise an earlier
-     chord clears the report, but it does not shut the door behind you. */
-  var open = 0;
-  function locked(slot){ return slot > open; }
-  function openTo(depth){
-    open = Math.max(open, Math.min(depth, state.chords.length - 1));
+  /* Checking is available at any time, and reads what is written rather than
+     waiting for it to be finished. A mistake in the second chord is worth
+     knowing about before the fifth is written on top of it, and equally
+     worth knowing about when the fifth has been written first, or the third
+     is only half there. Nothing is withheld: any chord can be written in any
+     order, and the checklist runs from the opening chord to the last chord
+     you have put a note in. What it could not look at it says so. */
+  function touchedDepth(){
+    var last = -1;
+    state.notes.forEach(function(n){ if (!n.given && n.slot > last) last = n.slot; });
+    return last + 1;
+  }
+  function chordsText(slots){
+    var t = chordList(slots);
+    return t.charAt(0).toUpperCase() + t.slice(1);
   }
 
   function runChecks(depth){
@@ -2125,6 +2121,23 @@
       var add = block([slot], spell(degree));
       v.forEach(function(n){ counts[n.letter] = (counts[n.letter] || 0) + 1; });
 
+      /* A chord with nothing in it has nothing to say. One that is part
+         written is only held to what can already be seen: a note that is no
+         tone of the chord is wrong however few notes there are, but a missing
+         third is not a fault in a chord still being written, and the voices
+         cannot be named until they are all there. */
+      if (!v.length) return;
+      if (!filled(slot)){
+        v.forEach(function(n){
+          if (tones.indexOf(n.letter) > -1) return;
+          add("error", "A note on " + n.name + " is not one of this chord's tones \u2014 " +
+              spell(degree) + ".", n.name);
+        });
+        add("note", (wantsAt(slot, true) || "This chord has " + v.length + " notes so far.") +
+            " Checked for stray notes only.");
+        return;
+      }
+
       /* a note that is not in the chord at all */
       v.forEach(function(n, idx){
         if (tones.indexOf(n.letter) > -1) return;
@@ -2146,7 +2159,8 @@
          taught. A seventh chord is exempt: its 4/3 is an ordinary chord,
          dissonant already and resolving like the rest. Nothing is said until
          the next chord is there to decide it. */
-      if (lowIdx === 2 && !hasSeventh(degree) && slot + 1 < depth){
+      if (lowIdx === 2 && !hasSeventh(degree) && slot + 1 < depth && filled(slot + 1) &&
+          (slot === 0 || filled(slot - 1))){
         var after = bassOf(voicesAt(slot + 1));
         var before = slot > 0 ? bassOf(voicesAt(slot - 1)) : null;
         var held = after.step === low.step, sat = !!before && before.step === low.step;
@@ -2475,6 +2489,26 @@
     }
     report.lines = whole ? readLines(full) : [];
     report.style = depth >= 2 ? readStyle(depth) : [];
+
+    /* What was not looked at. A clean report on half a progression must not
+       be mistaken for a clean report on all of it. */
+    var gaps = [], later = [], q2;
+    for (q2 = 0; q2 < state.chords.length; q2++){
+      if (q2 < depth && !slotCount(q2)) gaps.push(q2);
+      if (q2 >= depth) later.push(q2);
+    }
+    report.complete = !gaps.length && !later.length &&
+                      state.chords.every(function(c, k){ return filled(k); });
+    if (gaps.length || later.length){
+      var said = block(["So far"]);
+      if (gaps.length)
+        said("note", chordsText(gaps) + (gaps.length === 1 ? " has" : " have") +
+             " nothing written yet, so the " + (gaps.length === 1 ? "move" : "moves") +
+             " into and out of " + (gaps.length === 1 ? "it is" : "them are") + " not checked.");
+      if (later.length)
+        said("note", chordsText(later) + (later.length === 1 ? " is" : " are") +
+             " not written yet.");
+    }
     return report;
   }
 
@@ -2732,7 +2766,8 @@
     if (!report){ box.hidden = true; return; }
     box.hidden = false;
     var verdict = document.getElementById("verdict");
-    if (!report.errors && !report.cautions) verdict.textContent = "All clear.";
+    if (!report.errors && !report.cautions)
+      verdict.textContent = report.complete ? "All clear." : "All clear so far.";
     else {
       var parts = [];
       if (report.errors) parts.push(report.errors + (report.errors === 1 ? " thing to fix" : " things to fix"));
@@ -2956,7 +2991,7 @@
       var n = drag.note, at = state.notes.indexOf(n);
       if (at < 0){ drag = null; render(); return; }   /* it was cleared from under us */
       var t = targetAt(p);
-      if (t.slot !== n.slot && (slotFull(t.slot) || locked(t.slot))) return;   /* not that chord */
+      if (t.slot !== n.slot && slotFull(t.slot)) return;   /* not that chord */
       if ((t.slot !== n.slot || t.step !== n.step) && countAt(t.slot, t.step, n) < MAX_AT){
         if (t.slot === n.slot) t.voice = n.voice;    /* moving within a chord keeps the voice */
         state.notes[at] = t;
@@ -3078,7 +3113,7 @@
     }
     var t = targetAt(p);
     lastClick = null;
-    if (indexAt(t.slot, t.step) === -1 && !slotFull(t.slot) && !locked(t.slot)){
+    if (indexAt(t.slot, t.step) === -1 && !slotFull(t.slot)){
       state.notes.push(t);
       startPop(t.slot, t.step, t.staff);
     }
@@ -3111,7 +3146,7 @@
         i = indexAt(cursor.slot, cursor.step);
         if (i > -1 && state.notes[i].given) break;      /* not yours to take off */
         if (i > -1) state.notes.splice(i, 1);
-        else if (!slotFull(cursor.slot) && !locked(cursor.slot)){
+        else if (!slotFull(cursor.slot)){
           state.notes.push({slot:cursor.slot, step:cursor.step, staff:cursor.staff});
           startPop(cursor.slot, cursor.step, cursor.staff);
         }
@@ -3327,7 +3362,6 @@
             "note. The figures follow whatever bass you write."
   };
   function enterStage(){
-    open = Math.max(0, Math.min(open, state.chords.length - 1));
     fitStaff();
     SLOT_X = layoutSlots();
     stopPlayback();
@@ -3353,7 +3387,6 @@
     state.tonic = key.tonic;
     state.chords = makeProgression();
     state.marks = {};
-    open = 0;
     state.drill = kind;
     var line = kind === "bass" ? makeBass(state.chords) : makeSoprano(state.chords);
     state.notes = line.map(function(step, slot){
@@ -3381,7 +3414,7 @@
   begin.addEventListener("click", function(){
     var sig = state.mode + "|" + state.tonic + "|" + state.chords.join(",");
     if (sig !== state.live){                    /* a changed setup starts clean */
-      state.notes = []; state.marks = {}; state.drill = null; open = 0;
+      state.notes = []; state.marks = {}; state.drill = null;
     }
     enterStage();
   });
@@ -3631,10 +3664,9 @@
        have only this moment arrived, so they are read into voices first;
        everywhere else a render has already done that. */
     updateVoices();
-    var depth = writtenDepth();
+    var depth = touchedDepth();
     if (depth >= 1){
       report = runChecks(depth);
-      if (!report.errors) openTo(depth);
       reportKey = notesKey();
       flowAt = performance.now() - (reducedMotion() ? 1e6 : 0);
     }
@@ -3773,7 +3805,7 @@
       try {
         box = JSON.stringify({
           v:KEEP_V, mode:state.mode, tonic:state.tonic, chords:state.chords,
-          drill:state.drill, live:state.live, marks:state.marks, open:open,
+          drill:state.drill, live:state.live, marks:state.marks,
           staged:!stage.hidden, sevenths:sevenths, tempo:+tempo.value,
           notes:state.notes.map(function(n){
             return { slot:n.slot, step:n.step, staff:n.staff, given:!!n.given };
@@ -3837,7 +3869,6 @@
       if (n.given) note.given = true;
       return note;
     });
-    open = Math.max(0, Math.min(was.open | 0, state.chords.length - 1));
     sevenths = !!was.sevenths;
     if (was.tempo >= +tempo.min && was.tempo <= +tempo.max){
       tempo.value = was.tempo;
