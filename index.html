@@ -1526,10 +1526,10 @@
 
   /* A note is drawn at the length of the chord it is in: a semibreve is a
      hollow head and nothing else, a minim a hollow head on a stem, a crotchet
-     a black one, and a quaver and a semiquaver carry one flag and two. Flags
-     and not beams, since each voice has a stem of its own and the four of
-     them point two ways. A dot stands in a space — the one above, where the
-     note is on a line. */
+     a black one, and a quaver and a semiquaver carry one flag and two —
+     unless they are beamed to their neighbours, when the beam draws the stem
+     and the note is left bare. A dot stands in a space — the one above,
+     where the note is on a line. */
   function noteGroup(note, opts){
     var g = el("g",{}), x = SLOT_X[note.slot], y = yOf(note.step, note.staff), color = opts.color;
     var def = STAVES[note.staff], n = ledgerCount(note.staff, note.step), i, ly;
@@ -1547,7 +1547,7 @@
     /* the stem rises from the right of the head, or falls from its left */
     var up = opts.stem ? opts.stem === "up" : note.step < def.mid;
     var sx = up ? x + half - 0.7 : x - half + 0.7;
-    if (plain < 16){
+    if (plain < 16 && !opts.bare){
       g.appendChild(el("line",{x1:sx, y1:y, x2:sx, y2: up ? y - 42 : y + 42,
                                stroke:color, "stroke-width":1.4}));
       if (plain <= 2)
@@ -1570,6 +1570,113 @@
       g.setAttribute("transform", "translate(" + x + "," + y + ") scale(" + scale.toFixed(4) +
                      ") translate(" + (-x) + "," + (-y) + ")");
     return g;
+  }
+
+  /* ---------- beams --------------------------------------------------------
+     Quavers and semiquavers that fall in the same beat are joined by a beam
+     instead of each flying its own flag, which is how the eye is shown where
+     the beats are. A rest breaks a beam and so does the end of the beat.
+
+     A beam joins stems, and stems here have belonged to single notes, each
+     pointing whichever way its own height on the staff sends it. That cannot
+     be beamed: one beam needs its stems to point one way. So within a beam
+     the notes of a chord that are on one staff are taken together, as a
+     pianist's hand would be, and share a stem; the two staves are beamed
+     apart. The beam leans the way the notes do but by no more than a space,
+     and it is moved off the notes until the shortest stem under it is long
+     enough to read. Semiquavers take a second beam, and a lone one next
+     to a quaver takes a stub of one, pointing at the note it belongs with. */
+  var BEAM_THICK = S / 2, BEAM_GAP = S * 0.75, BEAM_STUB = S * 1.1, STEM_MIN = 30;
+  var BEAM_CEIL = 37, BEAM_FLOOR = 212, STEM_LEAST = 14;   /* clear of the tone letters, and of the numerals */
+  function beamPlan(){
+    var bare = [], shapes = [], groups = [], open = null;
+    var half = glyphW("noteheadBlack", S) / 2;
+    timeline().events.forEach(function(e){
+      var can = e.slot != null && plainOf(e.len) <= 2;
+      var beat = e.bar + ":" + Math.floor(e.pos / 4);
+      if (can && open && open.beat === beat) open.list.push(e);
+      else { open = can ? { beat:beat, list:[e] } : null; if (open) groups.push(open); }
+    });
+    function slab(x1, y1, x2, y2, toward){
+      shapes.push(el("polygon",{ fill:"var(--ink)",
+        points:[x1, y1, x2, y2, x2, y2 + toward * BEAM_THICK, x1, y1 + toward * BEAM_THICK].join(" ") }));
+    }
+    /* Where the beam may go. The two staves stand close, and between them
+       there is only room for notes; so a beam goes outside the pair — above
+       the treble, below the bass — where the stems have somewhere to run.
+       Outside is not unlimited either: the chord's tones are listed above
+       and its numeral stands below, and the beam stops short of both, the
+       stems simply being shorter for it. Only where that would leave a stem
+       too short to see does the beam turn and go inward instead. */
+    function fit(run, staff, up){
+      run.forEach(function(c){
+        var ys = c.notes.map(function(n){ return yOf(n.step, staff); });
+        c.top = Math.min.apply(null, ys);
+        c.bot = Math.max.apply(null, ys);
+        c.x = SLOT_X[c.e.slot] + (up ? half - 0.7 : -half + 0.7);
+        c.tip = up ? c.top - 42 : c.bot + 42;
+      });
+      var a = run[0], z = run[run.length - 1], dx = z.x - a.x;
+      var lean = Math.max(-S, Math.min(S, z.tip - a.tip)), shift = 0, shortest = Infinity;
+      function line(x){ return a.tip + (dx ? (x - a.x) * lean / dx : 0); }
+      run.forEach(function(c){
+        var room = up ? (c.top - STEM_MIN) - line(c.x) : (c.bot + STEM_MIN) - line(c.x);
+        if (up ? room < shift : room > shift) shift = room;
+      });
+      /* held inside the band between the tone letters and the numerals */
+      var edge = up ? Math.min(line(a.x), line(z.x)) + shift : Math.max(line(a.x), line(z.x)) + shift;
+      if (up && edge < BEAM_CEIL) shift += BEAM_CEIL - edge;
+      if (!up && edge > BEAM_FLOOR) shift -= edge - BEAM_FLOOR;
+      run.forEach(function(c){
+        var stem = up ? c.top - (line(c.x) + shift) : (line(c.x) + shift) - c.bot;
+        if (stem < shortest) shortest = stem;
+      });
+      return { up:up, shortest:shortest, y:function(x){ return line(x) + shift; } };
+    }
+    function beamRun(run, staff){
+      var out = staff === "treble", plan = fit(run, staff, out);
+      if (plan.shortest < STEM_LEAST){
+        var other = fit(run, staff, !out);
+        if (other.shortest > plan.shortest) plan = other; else plan = fit(run, staff, out);
+      }
+      var up = plan.up, toward = up ? 1 : -1, beamY = plan.y;
+      var a = run[0], z = run[run.length - 1];
+      run.forEach(function(c){
+        shapes.push(el("line",{ x1:c.x, y1: up ? c.bot : c.top, x2:c.x, y2:beamY(c.x),
+                                stroke:noteColor(c.notes[0]), "stroke-width":1.4 }));
+        c.notes.forEach(function(n){ bare.push(n); });
+      });
+      slab(a.x - 0.7, beamY(a.x - 0.7), z.x + 0.7, beamY(z.x + 0.7), toward);
+      /* the second beam, for the semiquavers among them */
+      var off = toward * BEAM_GAP, i, j, c, x1, x2;
+      for (i = 0; i < run.length; i++){
+        if (plainOf(run[i].e.len) !== 1) continue;
+        for (j = i; j + 1 < run.length && plainOf(run[j + 1].e.len) === 1; j++){}
+        if (j > i){ x1 = run[i].x - 0.7; x2 = run[j].x + 0.7; }
+        else {
+          c = run[i];
+          if (i === 0){ x1 = c.x - 0.7; x2 = c.x + BEAM_STUB; }
+          else { x1 = c.x - BEAM_STUB; x2 = c.x + 0.7; }
+        }
+        slab(x1, beamY(x1) + off, x2, beamY(x2) + off, toward);
+        i = j;
+      }
+    }
+    groups.forEach(function(g){
+      if (g.list.length < 2) return;
+      ["treble","bass"].forEach(function(staff){
+        var run = [];
+        function close(){ if (run.length > 1) beamRun(run, staff); run = []; }
+        g.list.forEach(function(e){
+          var notes = state.notes.filter(function(n){
+            return n.slot === e.slot && n.staff === staff && !(drag && drag.note === n);
+          });
+          if (notes.length) run.push({ e:e, notes:notes }); else close();
+        });
+        close();
+      });
+    });
+    return { bare:bare, shapes:shapes };
   }
 
   /* ---------- staff state -------------------------------------------------- */
@@ -1717,11 +1824,14 @@
     if (playingSlot != null && SLOT_X[playingSlot] != null)
       layerSlot.appendChild(el("rect",{x:SLOT_X[playingSlot]-24,y:44,width:48,height:172,rx:3,
                                        fill:"var(--accent-soft)"}));
+    var beams = beamPlan();
+    beams.shapes.forEach(function(shape){ layerNotes.appendChild(shape); });
     state.notes.forEach(function(n,i){
       if (drag && drag.note === n) return;
       /* the chord that is sounding colours itself, so the ear and the eye
          are on the same chord */
-      layerNotes.appendChild(noteGroup(n,{ color: noteColor(n), stem: stemFor(n) }));
+      layerNotes.appendChild(noteGroup(n,{ color: noteColor(n), stem: stemFor(n),
+                                           bare: beams.bare.indexOf(n) > -1 }));
     });
     /* an answer on offer: not on the staff yet, and drawn so as to say so */
     if (proposal){
