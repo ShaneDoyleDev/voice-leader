@@ -490,6 +490,8 @@
                 title="Take this note out and give its time to the note before it">Join left</button>
         <button type="button" class="ghost" id="note-right" disabled
                 title="Take this note out and give its time to the note after it">Join right</button>
+        <button type="button" class="ghost" id="note-tie" disabled aria-pressed="false"
+                title="Tie this note to the same note after it, so that it is held and not struck again">Tie</button>
         <span class="rownote" id="notesay" aria-live="polite"></span>
       </div>
       <textarea id="exporttext" readonly hidden aria-label="The exercise as text"></textarea>
@@ -908,6 +910,47 @@
     return (n.tie ? "~" : "") + (divided(n) ? "(" + n.segs.map(function(s){
       return s.step + s.staff.charAt(0) + s.len + (s.tie ? "~" : ""); }).join(" ") + ")" : "");
   }
+  /* A tie joins a note to the same pitch where it leaves off, so that it is
+     held and not struck again: the next note of its own voice inside the
+     chord, or, from the last of them, the note on that pitch that begins the
+     next chord. It is kept as a mark on the note it starts from, and means
+     something only while there is such a note to be tied to — move either
+     of them and the tie is simply not there. */
+  function tieTo(n, k){
+    var segs = segsOf(n), seg = segs[k], next = n.slot + 1, found = null;
+    if (!seg) return null;
+    if (k + 1 < segs.length) return segs[k + 1].step === seg.step ? { note:n, k:k + 1 } : null;
+    if (next >= state.chords.length || slotStart(next) !== slotStart(n.slot) + lenOf(n.slot)) return null;
+    state.notes.forEach(function(m){
+      if (m.slot !== next || segsOf(m)[0].step !== seg.step) return;
+      if (!found || (n.voice != null && m.voice === n.voice)) found = m;
+    });
+    return found ? { note:found, k:0 } : null;
+  }
+  /* every note that is held from the one before it rather than struck */
+  function tiesInto(){
+    var map = new Map();
+    state.notes.forEach(function(n){
+      segsOf(n).forEach(function(seg){
+        var to = seg.tie ? tieTo(n, seg.k) : null, had;
+        if (!to) return;
+        had = map.get(to.note) || {};
+        had[to.k] = true;
+        map.set(to.note, had);
+      });
+    });
+    return map;
+  }
+  function setTie(n, k, on){
+    var at = divided(n) ? n.segs[k] : n;
+    if (on) at.tie = true; else delete at.tie;
+  }
+  /* how long a note sounds, with everything it is tied on into */
+  function heldLen(n, k){
+    var seg = segsOf(n)[k], to = seg.tie ? tieTo(n, k) : null;
+    return seg.len + (to ? heldLen(to.note, to.k) : 0);
+  }
+
   /* a chord whose length has been changed under a cut takes the cut away */
   function tidyNotes(){
     state.notes.forEach(function(n){
@@ -2260,8 +2303,19 @@
     beams.shapes.forEach(function(shape){ layerNotes.appendChild(shape); });
     var headHalf = glyphW("noteheadBlack", S) / 2;
     DRAWN = [];
+    var heldOver = tiesInto();
     state.notes.forEach(function(n){
-      var whole = !divided(n), base = SLOT_ABS[n.slot] || 0, together, above;
+      var whole = !divided(n), base = SLOT_ABS[n.slot] || 0, together, above, into = heldOver.get(n);
+      /* over the upper notes on a staff and under the lower ones */
+      function sideOf(seg){
+        if (above == null){
+          together = state.notes.filter(function(m){ return m.slot === n.slot && m.staff === seg.staff; })
+                               .sort(function(a, b){ return a.step - b.step; });
+          above = together.length > 1 ? together.indexOf(n) >= together.length / 2
+                                      : seg.step >= STAVES[seg.staff].mid;
+        }
+        return above;
+      }
       var laned = beams.laned[n.slot + ":" + n.staff], dir = beams.dirs.get(n);
       if (drag && drag.note === n && whole) return;
       if (laned && dir) above = dir === "up";      /* a voice's ties go the way its stems do */
@@ -2274,22 +2328,21 @@
           var x = MOMENT_X[part.abs];
           if (x == null) return;
           layerNotes.appendChild(noteGroup({ slot:n.slot, step:seg.step, staff:seg.staff },
-            { color:color, stem: stemFor(n), col:{ x:x, len:part.len, part:j },
+            { color:color, stem: stemFor(n), col:{ x:x, len:part.len, part:j || (into && into[seg.k] ? 1 : 0) },
               name: held && touching && !j ? nameAt(n.slot, seg.step) : null,
               bare: laned || (whole && beams.bare.indexOf(n.slot + ":" + n.step + ":" + n.staff + ":" + j) > -1) }));
           DRAWN.push({ note:n, k:seg.k, abs:part.abs, x:x, step:seg.step, staff:seg.staff });
-          if (j){
-            if (above == null){
-              together = state.notes.filter(function(m){ return m.slot === n.slot && m.staff === seg.staff; })
-                                   .sort(function(a, b){ return a.step - b.step; });
-              above = together.length > 1 ? together.indexOf(n) >= together.length / 2
-                                          : seg.step >= STAVES[seg.staff].mid;
-            }
+          if (j)
             layerNotes.appendChild(tieShape(last + headHalf + 2.5, x - headHalf - 2.5,
-                                            yOf(seg.step, seg.staff), above, color));
-          }
+                                            yOf(seg.step, seg.staff), sideOf(seg), color));
           last = x;
         });
+        /* and a tie of your own, on to the same note where this one leaves off */
+        var to = seg.tie ? tieTo(n, seg.k) : null;
+        var toX = to ? MOMENT_X[(SLOT_ABS[to.note.slot] || 0) + segsOf(to.note)[to.k].at] : null;
+        if (toX != null && last != null)
+          layerNotes.appendChild(tieShape(last + headHalf + 2.5, toX - headHalf - 2.5,
+                                          yOf(seg.step, seg.staff), sideOf(seg), color));
       });
     });
     /* the note in hand wears a ring */
@@ -2928,8 +2981,14 @@
            : by === 0 ? "is repeated as " + q.name
            : "left by " + (Math.abs(by) === 1 ? "step" : "leap") + " to " + q.name;
     }
-    var FIGURE_HINT = "A note outside the chord is passed through by step, or stepped to and " +
-                      "straight back from.";
+    var FIGURE_HINT = "A note outside the chord is passed through by step, stepped to and straight " +
+                      "back from, or held over from the chord before and resolved by step.";
+    function soundAt(v, abs){
+      var line = lines[v], i;
+      for (i = 0; i < line.length; i++)
+        if (line[i].abs <= abs && abs < line[i].abs + line[i].len) return line[i];
+      return null;
+    }
     function figureOf(v, j){
       var line = lines[v], x = line[j], who = VOICES[v];
       var p = (j > 0 && !x.gap) ? line[j - 1] : null;
@@ -2965,6 +3024,56 @@
           return { kind:"neighbour", hear:hear, strong:(inBy > 0 ? "upper" : "lower") + " neighbour",
                    text:who + "'s " + x.name + " is " + (inBy > 0 ? "an upper" : "a lower") +
                         " neighbour: a step away from " + p.name + " and straight back." };
+        /* A suspension: a note that belonged to the chord before, held over
+           into this one where it does not, and then resolved down by step
+           to a note that does. Held over and resolved up, it is a
+           retardation. It is named for what it stands above the bass and
+           what it resolves to there — 4–3, 7–6, 9–8 — and it has
+           manners: it leans, so it takes a stronger place than its
+           resolution; it is prepared by a note at least as long as itself;
+           and the note it is going to is kept out of the other voices until
+           it gets there, the bass apart. */
+        if (inBy === 0 && Math.abs(outBy) === 1 && x.k === 0 && p.slot < x.slot && p.tone){
+          var down = outBy < 0, low = v > 0 ? soundAt(0, x.abs) : null, figure = "", also = [], w, other;
+          if (low){
+            var up = x.step - low.step, num = ((up % 7) + 7) % 7 + 1;
+            figure = !down ? (num === 7 ? "7\u20138 " : "")
+                   : num === 2 ? (up > 7 ? "9\u20138 " : "2\u20131 ")
+                   : num === 1 ? "" : num + "\u2013" + (num - 1) + " ";
+          } else if (v === 0 && down){
+            for (w = 1; w < MAX_VOICES; w++){
+              other = soundAt(w, x.abs);
+              if (other && (((other.step - x.step) % 7) + 7) % 7 === 1) figure = "2\u20133 ";
+            }
+          }
+          var kind = down ? "suspension" : "retardation", prep = p.len, back = j - 1;
+          while (back > 0 && line[back - 1].tie && line[back - 1].step === p.step && !line[back].gap)
+            prep += line[--back].len;
+          if (weightOf(x) <= weightOf(q))
+            also.push({ level:"caution", strong:"stronger place",
+              text:who + "'s " + kind + " stands on no stronger a place than the " + q.name + " it resolves " +
+                   "to. It is the note that leans, so it takes the stronger place of the two and resolves " +
+                   "on the weaker." });
+          if (prep < x.len)
+            also.push({ level:"caution", strong:"prepared",
+              text:who + "'s " + kind + " is prepared by a shorter note than itself: " + p.name + " lasts " +
+                   withArticle(lenWords(prep)) + " before " + withArticle(lenWords(x.len)) +
+                   " held over. The preparation is " +
+                   "normally at least as long as the note it prepares." });
+          for (w = 1; down && w < MAX_VOICES; w++){
+            other = w === v ? null : soundAt(w, x.abs);
+            if (other && other.letter === q.letter)
+              also.push({ level:"caution", strong:"already sounding",
+                text:"The " + q.name.replace(/\d+$/, "") + " that " + who + "'s " + kind + " resolves to is " +
+                     "already sounding in the " + VOICES[w] + ", " + other.name + ". The note of resolution " +
+                     "is kept out of the other voices while the suspension lasts \u2014 only the bass may " +
+                     "have it, under a 9\u20138." });
+          }
+          return { kind:kind, hear:hear, strong:figure + kind, also:also,
+                   text:who + "'s " + x.name + " is a " + figure + kind + ": " + (p.tie ? "tied" : "held") +
+                        " over from the chord before, where it belonged, and resolved " +
+                        (down ? "down" : "up") + " by step to " + q.name + "." };
+        }
       }
       return { kind:null, hear:(p || q) ? hear : null,
                text:who + " has " + x.name + " inside this chord, which is not one of its tones \u2014 " +
@@ -3079,6 +3188,7 @@
           if (!fig.kind){ add("error", fig.text, nameAt(slot, sg.step), fig.hear); return; }
           excuse(n.of, sg.k);
           if (!fig.silent) add(fig.level || "ok", fig.text, fig.strong, fig.hear);
+          (fig.also || []).forEach(function(more){ add(more.level, more.text, more.strong, fig.hear); });
         });
       });
       if (voiced && rows[slot].some(function(n){ return divided(n.of); })) inside(slot, add);
@@ -3918,7 +4028,7 @@
      as a rest is. The tempo is the crotchet's, so a minim takes two of its
      beats and a semiquaver a quarter of one. */
   function soundPlan(){
-    var events = timeline().events, at = {}, list = [], end = 0;
+    var events = timeline().events, at = {}, list = [], end = 0, heldOver = tiesInto();
     function moment(abs){
       if (!at[abs]){ at[abs] = { abs:abs, slot:null, notes:[] }; list.push(at[abs]); }
       return at[abs];
@@ -3931,9 +4041,10 @@
       state.notes.forEach(function(n){
         if (n.slot !== e.slot) return;
         segsOf(n).forEach(function(seg){
+          if (heldOver.get(n) && heldOver.get(n)[seg.k]) return;      /* held, not struck */
           var then = moment(e.abs + seg.at);
           then.slot = e.slot;
-          then.notes.push({ slot:n.slot, step:seg.step, len:seg.len });
+          then.notes.push({ slot:n.slot, step:seg.step, len:heldLen(n, seg.k) });
         });
       });
     });
@@ -4036,6 +4147,7 @@
         var piece = n.segs[drag.k];
         if (piece && piece.step !== t.step){
           piece.step = t.step; piece.staff = t.staff;
+          delete piece.tie;
           settle(n);
           drag.moved = true;
           render();
@@ -4045,7 +4157,6 @@
       if (t.slot !== n.slot && slotFull(t.slot)) return;   /* not that chord */
       if ((t.slot !== n.slot || t.step !== n.step) && countAt(t.slot, t.step, n) < MAX_AT){
         if (t.slot === n.slot) t.voice = n.voice;    /* moving within a chord keeps the voice */
-        if (n.tie) t.tie = true;
         if (sel && sel.note === n) sel = { note:t, k:0 };
         state.notes[at] = t;
         drag.note = t;
@@ -4453,6 +4564,7 @@
   /* the same pictures under the staff, for the note that is selected there */
   var noteBtns = {}, noteSay = document.getElementById("notesay");
   var noteLeft = document.getElementById("note-left"), noteRight = document.getElementById("note-right");
+  var noteTie = document.getElementById("note-tie");
   (function buildNoteBar(){
     var row = document.getElementById("notelens");
     LENGTHS.forEach(function(len){
@@ -4478,6 +4590,12 @@
       var s = selSeg();
       if (s && joinSeg(sel.note, s.k, 1)) render();
     });
+    noteTie.addEventListener("click", function(){
+      var s = selSeg();
+      if (!s || !tieTo(sel.note, s.k)) return;
+      setTie(sel.note, s.k, !s.tie);
+      render();
+    });
   })();
   function renderNoteBar(){
     var s = selSeg(), n = s ? sel.note : null, count = n ? segsOf(n).length : 0;
@@ -4488,6 +4606,9 @@
     });
     noteLeft.disabled = !s || !canJoin(n, s.k, -1);
     noteRight.disabled = !s || !canJoin(n, s.k, 1);
+    var tieable = !!s && !!tieTo(n, s.k);
+    noteTie.disabled = !tieable;
+    noteTie.setAttribute("aria-pressed", String(tieable && s.tie));
     noteSay.textContent = !s
       ? (state.notes.length ? "Select a note to give it a length of its own inside its chord." : "")
       : (n.voice != null ? VOICES[n.voice] + ", chord " : "Chord ") + (n.slot + 1) + ": " +
