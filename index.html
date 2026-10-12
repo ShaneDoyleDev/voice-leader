@@ -1035,7 +1035,32 @@
      listed above the chord to stand clear of the next. */
   var ROOM = { 16:1.9, 12:1.65, 8:1.4, 6:1.2, 4:1, 3:0.92, 2:0.86, 1:0.8 }, COLUMN = 108;
   var SLOT_X = [], SLOT_END = [], SLOT_ABS = [], COLS = [], BAR_X = [];
-  var MOMENTS = [], MOMENT_X = {}, laidKey = "";
+  var MOMENTS = [], MOMENT_X = {}, laidKey = "", TIME_END = null;
+  /* Anywhere in time has a place across the staff, between the moments that
+     are drawn: what stands between two of them is spread evenly. It is how a
+     note not yet written can be shown where it would go, and how a press
+     between two noteheads is read as a time. */
+  function stops(){ return TIME_END ? MOMENTS.concat([TIME_END]) : MOMENTS; }
+  function xAtAbs(abs){
+    var list = stops(), i, a, b;
+    if (!list.length) return null;
+    if (abs <= list[0].abs) return list[0].x;
+    for (i = 0; i + 1 < list.length; i++){
+      a = list[i]; b = list[i + 1];
+      if (abs <= b.abs) return b.abs === a.abs ? a.x : a.x + (b.x - a.x) * (abs - a.abs) / (b.abs - a.abs);
+    }
+    return list[list.length - 1].x;
+  }
+  function absAtX(x){
+    var list = stops(), i, a, b;
+    if (!list.length) return 0;
+    if (x <= list[0].x) return list[0].abs;
+    for (i = 0; i + 1 < list.length; i++){
+      a = list[i]; b = list[i + 1];
+      if (x <= b.x) return b.x === a.x ? a.abs : a.abs + (b.abs - a.abs) * (x - a.x) / (b.x - a.x);
+    }
+    return list[list.length - 1].abs;
+  }
   function staffStart(){ return SIG_X + sigWidth(S) + TIME_W + 46; }
   /* the parts of everything, in a row: each a note or a rest of one value */
   function columnsOf(events){
@@ -1109,6 +1134,9 @@
       x += strideOf(moments, at) * k;
     });
     events.forEach(function(e){ if (e.slot != null) SLOT_ABS[e.slot] = e.abs; });
+    var tail = moments[moments.length - 1], last2 = events[events.length - 1];
+    TIME_END = { abs:last2.abs + last2.len,
+                 x:tail.x + COLUMN * roomFor(Math.max(1, last2.abs + last2.len - tail.abs)) * k };
     cols.forEach(function(c){
       c.x = MOMENT_X[c.abs];
       if (c.slot != null){
@@ -2191,6 +2219,85 @@
     }
     settle(n);
   }
+  /* ---------- writing a note where it goes ---------------------------------
+     A note value can be armed, and then a press on the staff writes a note of
+     that value there: at that time, in the chord it falls in, at the pitch
+     pressed. Which voice it belongs to is the one whose note is sounding
+     there and is nearest in pitch — a passing tone is a step from the voice
+     that has it, so that is where the pressed pitch will be. The preview
+     says which voice it is. The note overwrites what that voice had in its
+     time: a longer note is cut around it, a shorter one is taken over, and
+     whatever is left over at either end stays as it was, written as tied
+     notes where it is not itself one note value.
+
+     It applies once a chord has all four of its voices, since a voice's notes
+     are what fills its chord, and the chord is what has to be written first.
+     Short of that a press writes the chord's notes as it always has. */
+  var armed = null;
+  function chordAt(abs){
+    var found = null;
+    timeline().events.forEach(function(e){
+      if (e.slot != null && abs >= e.abs && abs < e.abs + e.len) found = e;
+    });
+    return found;
+  }
+  function gridOf(len){ return len & -len; }       /* the lowest bit: 6 steps by 2, 12 by 4 */
+  function writeFor(f){
+    if (!armed || !f || drag) return null;
+    var abs = f === cursor ? cursorAbs() : absAtX(f.x), e = chordAt(abs);
+    if (!e || armed >= e.len || slotCount(e.slot) !== MAX_VOICES) return null;
+    var g = gridOf(armed), t = Math.round((abs - e.abs) / g) * g;
+    t = clamp(t, 0, Math.floor((e.len - armed) / g) * g);
+    var best = null, bestD = Infinity;
+    notesIn(e.slot).forEach(function(n){
+      segsOf(n).forEach(function(seg){
+        if (seg.at > t || t >= seg.at + seg.len) return;
+        var dist = Math.abs(midiAt(e.slot, seg.step) - midiAt(e.slot, f.step));
+        if (dist < bestD){ bestD = dist; best = n; }
+      });
+    });
+    if (!best) return null;
+    return { slot:e.slot, note:best, t:t, len:armed, abs:e.abs + t, step:f.step, staff:f.staff };
+  }
+  /* a stretch that is not one note value, as the fewest that are, tied */
+  function laidOut(len, step, staff){
+    var out = [], k;
+    while (len > 0){
+      for (k = 0; LENGTHS[k] > len; k++){}
+      out.push({ step:step, staff:staff, len:LENGTHS[k], tie:true });
+      len -= LENGTHS[k];
+    }
+    delete out[out.length - 1].tie;
+    return out;
+  }
+  function writeNote(w){
+    var n = w.note, segs = segsOf(n), end = w.t + w.len, out = [], at = 0, placed = false, at2 = -1;
+    var tail = segs[segs.length - 1], leave = !!tail.tie && tail.step;
+    segs.forEach(function(s){
+      var a = at, b = at + s.len;
+      at = b;
+      if (b <= w.t || a >= end){ out.push({ step:s.step, staff:s.staff, len:s.len, tie:s.tie }); return; }
+      if (!placed){
+        if (a < w.t) laidOut(w.t - a, s.step, s.staff).forEach(function(p){ out.push(p); });
+        at2 = out.length;
+        out.push({ step:w.step, staff:w.staff, len:w.len });
+        placed = true;
+      }
+      if (b > end) laidOut(b - end, s.step, s.staff).forEach(function(p){ out.push(p); });
+    });
+    /* a tie is only ever to the same pitch next, and the one out of the
+       chord goes on belonging to the note that leaves it */
+    out.forEach(function(s, i){
+      if (s.tie && !(out[i + 1] && out[i + 1].step === s.step)) delete s.tie;
+      if (!s.tie) delete s.tie;
+    });
+    delete n.tie;
+    n.segs = out;
+    if (leave && out[out.length - 1].step === leave) out[out.length - 1].tie = true;
+    settle(n);
+    return divided(n) ? at2 : 0;
+  }
+
   /* a piece taken out gives its time to the piece before it, or the one after */
   function canJoin(n, k, side){ return divided(n) && !!n.segs[k + side]; }
   function joinSeg(n, k, side){
@@ -2306,6 +2413,8 @@
     /* the keyboard's cursor stands at a moment, which may be inside a chord */
     var focusX = focus ? SLOT_X[focus.slot] : null;
     if (focus && focus === cursor && MOMENT_X[cursorAbs()] != null) focusX = MOMENT_X[cursorAbs()];
+    var writing = writeFor(focus);
+    if (writing) focusX = xAtAbs(writing.abs);
     if (focus) layerSlot.appendChild(el("rect",{x:focusX-22,y:44,width:44,height:172,rx:3,fill:"var(--accent-soft)"}));
     if (playingSlot != null && SLOT_X[playingSlot] != null)
       layerSlot.appendChild(el("rect",{x:SLOT_X[playingSlot]-24,y:44,width:48,height:172,rx:3,
@@ -2377,6 +2486,12 @@
         layerGhost.appendChild(noteGroup(drag.note,{color:"var(--accent)", pop:false,
           name: touching ? nameAt(drag.note.slot, drag.note.step) : null}));
     }
+    else if (writing)
+      layerGhost.appendChild(noteGroup({ slot:writing.slot, step:writing.step, staff:writing.staff },
+        { color:"var(--accent)", opacity:0.6, pop:false,
+          col:{ x:xAtAbs(writing.abs), len:writing.len, part:1 },
+          name:(writing.note.voice != null ? VOICE_SHORT[writing.note.voice] + " " : "") +
+               nameAt(writing.slot, writing.step) }));
     else if (focus && indexAt(focus.slot, focus.step) === -1 && !slotFull(focus.slot))
       layerGhost.appendChild(noteGroup(focus,{color:"var(--accent)", opacity:0.55, pop:false,
         name: touching ? nameAt(focus.slot, focus.step) : null}));
@@ -4169,7 +4284,7 @@
   }
   function targetAt(p){
     var staff = staffAt(p.y);
-    return { slot:slotAt(p.x), step:stepAt(p.y, staff), staff:staff };
+    return { slot:slotAt(p.x), step:stepAt(p.y, staff), staff:staff, x:p.x };
   }
   /* The note under the pointer is the one at the position the pointer snaps
      to. Measuring a box around each notehead instead would reach further than
@@ -4249,8 +4364,10 @@
     /* whether the pointer is in that chord's own column, not merely nearest
        to it — the cross is offered on that, so it has to redraw on it too */
     var near = Math.abs(p.x - SLOT_X[t2.slot]) <= 30;
+    var wt = writeFor(t2);
+    t2.cell = wt ? wt.abs + "/" + wt.step + "/" + state.notes.indexOf(wt.note) : "";
     if (!hover || hover.slot !== t2.slot || hover.step !== t2.step ||
-        hover.staff !== t2.staff || near !== hoverNear){
+        hover.staff !== t2.staff || near !== hoverNear || hover.cell !== t2.cell){
       hover = t2;
       hoverNear = near;
       render();
@@ -4356,9 +4473,11 @@
     if (Math.hypot(p.x - from.x, p.y - from.y) > far){  /* a drag across empty staff, not a click */
       hover = targetAt(p); render(); return;
     }
-    var t = targetAt(p);
+    var t = targetAt(p), wrote = writeFor(t);
     lastClick = null;
-    if (indexAt(t.slot, t.step) === -1 && !slotFull(t.slot)){
+    if (wrote){
+      sel = { note:wrote.note, k:writeNote(wrote) };
+    } else if (indexAt(t.slot, t.step) === -1 && !slotFull(t.slot)){
       state.notes.push(t);
       startPop(t.slot, t.step, t.staff);
       sel = { note:t, k:0 };
@@ -4383,17 +4502,27 @@
   /* Left and right go from one moment to the next, so a note a voice starts
      inside a chord can be reached as well as the chord. */
   function cursorAbs(){
-    var i;
-    if (cursor.abs != null)
-      for (i = 0; i < MOMENTS.length; i++)
-        if (MOMENTS[i].abs === cursor.abs && MOMENTS[i].slot === cursor.slot) return cursor.abs;
-    return SLOT_ABS[cursor.slot] || 0;
+    var e = cursor.abs != null ? chordAt(cursor.abs) : null;
+    return e && e.slot === cursor.slot ? cursor.abs : (SLOT_ABS[cursor.slot] || 0);
+  }
+  /* everywhere the cursor can stand: at each chord and each note begun in
+     one, and, with a note value armed, at each step of it inside a chord */
+  function standings(){
+    var at = {}, list = [];
+    MOMENTS.forEach(function(m){ if (m.slot != null) at[m.abs] = m.slot; });
+    if (armed) timeline().events.forEach(function(e){
+      var g = gridOf(armed), t;
+      if (e.slot == null || armed >= e.len || slotCount(e.slot) !== MAX_VOICES) return;
+      for (t = 0; t + armed <= e.len; t += g) at[e.abs + t] = e.slot;
+    });
+    Object.keys(at).forEach(function(k){ list.push({ abs:+k, slot:at[k] }); });
+    return list.sort(function(a, b){ return a.abs - b.abs; });
   }
   function moveAcross(dir){
-    var list = MOMENTS.filter(function(m){ return m.slot != null; }), here = cursorAbs(), i, at = 0;
-    for (i = 0; i < list.length; i++) if (list[i].abs === here) at = i;
-    at = clamp(at + dir, 0, list.length - 1);
+    var list = standings(), here = cursorAbs(), i, at = 0;
     if (!list.length) return;
+    for (i = 0; i < list.length; i++) if (list[i].abs <= here) at = i;
+    at = clamp(at + dir, 0, list.length - 1);
     cursor.abs = list[at].abs;
     cursor.slot = list[at].slot;
   }
@@ -4408,6 +4537,11 @@
       case "Enter": case " ":
         hit = drawnAt(cursorAbs(), cursor.step);
         if (hit) takeOff(hit.note, hit.k);
+        else if (writeFor(cursor)){
+          fresh = writeFor(cursor);
+          sel = { note:fresh.note, k:writeNote(fresh) };
+          fresh = null;
+        }
         else if (indexAt(cursor.slot, cursor.step) === -1 && !slotFull(cursor.slot)){
           fresh = {slot:cursor.slot, step:cursor.step, staff:cursor.staff};
           state.notes.push(fresh);
@@ -4649,13 +4783,16 @@
     LENGTHS.forEach(function(len){
       var b = document.createElement("button");
       b.type = "button";
-      b.title = "Make this note " + withArticle(LEN_NAME[len]);
+      b.title = "Write " + LEN_NAME[len] + " notes: press the staff where each one goes. " +
+                "With a note selected, this also makes it " + withArticle(LEN_NAME[len]) + ".";
       b.setAttribute("aria-label", b.title);
       b.appendChild(miniNote(len));
       b.addEventListener("click", function(){
         var s = selSeg();
-        if (!s) return;
-        setLength(sel.note, s.k, len);
+        if (s && len !== s.len && canLength(sel.note, s.k, len)){
+          setLength(sel.note, s.k, len);
+          armed = len;
+        } else armed = (s && len !== s.len) ? len : (armed === len ? null : len);
         render();
       });
       row.appendChild(b);
@@ -4679,18 +4816,20 @@
   function renderNoteBar(){
     var s = selSeg(), n = s ? sel.note : null, count = n ? segsOf(n).length : 0;
     LENGTHS.forEach(function(len){
-      var here = !!s && len === s.len;
-      noteBtns[len].disabled = !s || (!here && !canLength(n, s.k, len));
-      noteBtns[len].setAttribute("aria-pressed", String(here));
+      noteBtns[len].disabled = false;
+      noteBtns[len].setAttribute("aria-pressed", String(armed === len));
     });
     noteLeft.disabled = !s || !canJoin(n, s.k, -1);
     noteRight.disabled = !s || !canJoin(n, s.k, 1);
     var tieable = !!s && !!tieTo(n, s.k);
     noteTie.disabled = !tieable;
     noteTie.setAttribute("aria-pressed", String(tieable && s.tie));
+    var writes = armed ? "Writing " + LEN_NAME[armed] + " notes: press the staff where one goes. A chord " +
+                         "takes them once it has all four voices. Esc stops." : "";
     noteSay.textContent = !s
-      ? (state.notes.length ? "Select a note to give it a length of its own inside its chord." : "")
-      : (n.voice != null ? VOICES[n.voice] + ", chord " : "Chord ") + (n.slot + 1) + ": " +
+      ? (writes || (state.notes.length
+           ? "Pick a note value to write with, or select a note to give it a length of its own." : ""))
+      : (writes ? writes + " \u2014 " : "") + (n.voice != null ? VOICES[n.voice] + ", chord " : "Chord ") + (n.slot + 1) + ": " +
         nameAt(n.slot, s.step) + ", " + withArticle(lenWords(s.len)) +
         (count > 1 ? " — note " + (s.k + 1) + " of " + count + " in this chord" : "");
   }
@@ -5473,6 +5612,7 @@
     if (e.key !== "Escape") return;
     if (proposal){ e.preventDefault(); dropProposal(); }
     else if (sel && !stage.hidden){ sel = null; render(); }
+    else if (armed && !stage.hidden){ armed = null; render(); }
   });
 
   /* ---------- the exercise as text ----------------------------------------
