@@ -1718,12 +1718,16 @@
       return Math.round(a[i] + (b[i] - a[i]) * t);
     }).join(",") + ")";
   }
-  function noteColor(n, step){
+  function noteColor(n, step, k){
     /* A wrong note is marked when the checklist says so, not while it is
        being written — the staff stays plain notation until it is checked,
        and editing anything clears the report and the red with it. */
-    if (report && n.slot < report.depth && !isTone(n.slot, step == null ? n.step : step))
-      return "var(--wrong)";
+    if (report && n.slot < report.depth && !isTone(n.slot, step == null ? n.step : step)){
+      /* a note outside the chord that the line carries is not a wrong note */
+      var own = n.of || n, fine = report.excused && report.excused.get(own);
+      if (k == null) k = n.k != null ? n.k : headOf(own).k;
+      if (!(fine && fine[k])) return "var(--wrong)";
+    }
     var t = tintOf(n.slot);
     return t <= 0 ? "var(--ink)"
          : t >= 1 ? "var(--accent)"
@@ -1996,7 +2000,7 @@
                                     notes:[] };
                 lane.list.push(c);
               }
-              c.notes.push({ slot:slot, step:seg.step, staff:seg.staff });
+              c.notes.push({ slot:slot, step:seg.step, staff:seg.staff, of:l.note, k:seg.k });
             });
           });
         });
@@ -2265,7 +2269,7 @@
         /* the chord that is sounding colours itself, so the ear and the eye
            are on the same chord; a note being moved is drawn as one in hand */
         var held = drag && drag.note === n && drag.k === seg.k;
-        var color = held ? "var(--accent)" : noteColor(n, seg.step), last = null;
+        var color = held ? "var(--accent)" : noteColor(n, seg.step, seg.k), last = null;
         partsFrom(base + seg.at, seg.len).forEach(function(part, j){
           var x = MOMENT_X[part.abs];
           if (x == null) return;
@@ -2815,7 +2819,7 @@
   }
 
   function runChecks(depth){
-    var report = { blocks:[], parallels:[], errors:0, cautions:0, depth:depth };
+    var report = { blocks:[], parallels:[], errors:0, cautions:0, depth:depth, excused:new Map() };
     function block(label, sub){
       var b = { label:label, sub:sub || "", items:[] };
       report.blocks.push(b);
@@ -2896,6 +2900,76 @@
             "the same way, " + s0.name + " to " + sp.name + " to " + sq.name +
             " \u2014 a leap that size wants the line to turn back after it, by step for " +
             "preference.", null, hearTriple);
+    }
+    /* ---- figuration ----
+       A note that is no tone of its chord is not thereby wrong. Whether it
+       belongs is a matter of how the voice gets to it and how it leaves:
+       the harmony is given, so the note is known to be outside it, and all
+       that is left to ask is whether the line carries it. Each kind of
+       figure is a shape — so many steps in, so many out, on a stronger or a
+       weaker place than the note it goes to — and a note that fits one is
+       named for it and passed. One that fits none is the fault it always
+       was, and is told how it was reached and left so that it can be seen
+       why. */
+    var bar = barLen();
+    function weightOf(n){ return placeStrength(n.abs % bar); }
+    function excuse(note, k){
+      var had = report.excused.get(note) || {};
+      had[k] = true;
+      report.excused.set(note, had);
+    }
+    function howIn(p, by){
+      return !p ? "it has nothing before it"
+           : by === 0 ? "it repeats " + p.name
+           : "it is reached by " + (Math.abs(by) === 1 ? "step" : "leap") + " from " + p.name;
+    }
+    function howOut(q, by){
+      return !q ? "nothing follows it"
+           : by === 0 ? "is repeated as " + q.name
+           : "left by " + (Math.abs(by) === 1 ? "step" : "leap") + " to " + q.name;
+    }
+    var FIGURE_HINT = "A note outside the chord is passed through by step, or stepped to and " +
+                      "straight back from.";
+    function figureOf(v, j){
+      var line = lines[v], x = line[j], who = VOICES[v];
+      var p = (j > 0 && !x.gap) ? line[j - 1] : null;
+      var q = (j + 1 < line.length && !line[j + 1].gap) ? line[j + 1] : null;
+      var inBy = p ? x.step - p.step : null, outBy = q ? q.step - x.step : null;
+      var hear = { seq:[p, x, q].filter(Boolean).map(function(n){ return [{ slot:n.slot, step:n.step }]; }) };
+      /* the last chord written so far, with more to come: the note may yet
+         be carried by what follows it */
+      if (p && !q && x.slot === depth - 1 && depth < state.chords.length && j === line.length - 1)
+        return { kind:"waiting", level:"note",
+                 text:who + "'s " + x.name + " is not a tone of this chord, and what it is depends on " +
+                      "the note after it, which is not written yet." };
+      if (p && q){
+        var accented = weightOf(x) > weightOf(q);
+        /* a double neighbour: a step to one side of a note, a third across
+           to the other side, and back to it */
+        var q2 = (j + 2 < line.length && !line[j + 2].gap) ? line[j + 2] : null;
+        var p2 = (j > 1 && !p.gap) ? line[j - 2] : null;
+        if (q2 && !q.tone && Math.abs(inBy) === 1 && outBy === -2 * inBy && q2.step === p.step)
+          return { kind:"double neighbour", hear:{ seq:[p, x, q, q2].map(function(n){
+                     return [{ slot:n.slot, step:n.step }]; }) },
+                   text:who + "'s " + x.name + " and " + q.name + " are a double neighbour: a step to one " +
+                        "side of " + p.name + ", across to the other side of it, and back.",
+                   strong:"double neighbour" };
+        if (p2 && !p.tone && Math.abs(outBy) === 1 && inBy === -2 * outBy && p2.step === q.step)
+          return { kind:"double neighbour", silent:true };          /* the second of the pair: said already */
+        if (Math.abs(inBy) === 1 && inBy === outBy)
+          return { kind:"passing", hear:hear, strong:(accented ? "accented " : "") + "passing tone",
+                   text:who + "'s " + x.name + " is " + (accented ? "an accented" : "a") +
+                        " passing tone, stepping through from " + p.name + " to " + q.name +
+                        (accented ? " on the stronger part of the beat." : ".") };
+        if (Math.abs(inBy) === 1 && outBy === -inBy)
+          return { kind:"neighbour", hear:hear, strong:(inBy > 0 ? "upper" : "lower") + " neighbour",
+                   text:who + "'s " + x.name + " is " + (inBy > 0 ? "an upper" : "a lower") +
+                        " neighbour: a step away from " + p.name + " and straight back." };
+      }
+      return { kind:null, hear:(p || q) ? hear : null,
+               text:who + " has " + x.name + " inside this chord, which is not one of its tones \u2014 " +
+                    spell(state.chords[x.slot]) + " \u2014 and nothing about the line excuses it: " +
+                    howIn(p, inBy) + " and " + howOut(q, outBy) + ". " + FIGURE_HINT };
     }
     /* What four voices do against each other inside a chord, once one of
        them has started to move there: any two that arrive on a new note at
@@ -2987,15 +3061,24 @@
         if (!divided(n.of)) return;
         var who = voiced ? VOICES[idx] : "A voice", line = voiced ? lines[idx] : null, j;
         segsOf(n.of).forEach(function(sg){
+          if (voiced) j = firstIn[idx][slot] + sg.k;
           if (voiced && sg.k > 0){
-            j = firstIn[idx][slot] + sg.k;
             lineChecks(add, idx, (j > 1 && !line[j - 1].gap) ? line[j - 2] : null, line[j - 1], line[j],
                        seqOf(line[j - 1], line[j]),
                        (j > 1 && !line[j - 1].gap) ? seqOf(line[j - 2], line[j - 1], line[j]) : null);
           }
           if (sg.k === n.k || isTone(slot, sg.step)) return;
-          add("error", who + " has " + nameAt(slot, sg.step) + " inside this chord, which is not one " +
-              "of its tones \u2014 " + spell(degree) + ".", nameAt(slot, sg.step));
+          /* without four named voices there is no line to read it along */
+          if (!voiced){
+            add("note", "A voice has " + nameAt(slot, sg.step) + " inside this chord, which is not one " +
+                "of its tones. It is read as a figure once all four voices are written.");
+            excuse(n.of, sg.k);
+            return;
+          }
+          var fig = figureOf(idx, j);
+          if (!fig.kind){ add("error", fig.text, nameAt(slot, sg.step), fig.hear); return; }
+          excuse(n.of, sg.k);
+          if (!fig.silent) add(fig.level || "ok", fig.text, fig.strong, fig.hear);
         });
       });
       if (voiced && rows[slot].some(function(n){ return divided(n.of); })) inside(slot, add);
