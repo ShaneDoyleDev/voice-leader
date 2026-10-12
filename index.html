@@ -746,7 +746,7 @@
     6:{ 2:3, 4:3, 5:0.6 },
     7:{ 1:6, 3:0.8 }
   };
-  var LENGTHS = [4, 5, 5, 5, 6, 6, 6, 7, 7, 8, 8];     /* 5 and 6 likeliest, 4 and 8 the edges */
+  var PROG_LENGTHS = [4, 5, 5, 5, 6, 6, 6, 7, 7, 8, 8];     /* 5 and 6 likeliest, 4 and 8 the edges */
   function flowFrom(degree){
     var opts = FLOW[degree], out = [];
     Object.keys(opts).forEach(function(k){
@@ -775,7 +775,7 @@
   function makeFunctional(withSevenths){
     var tries, length, out, i, dominant;
     for (tries = 0; tries < 400; tries++){
-      length = LENGTHS[Math.floor(Math.random() * LENGTHS.length)];
+      length = PROG_LENGTHS[Math.floor(Math.random() * PROG_LENGTHS.length)];
       out = [1];
       for (i = 1; i < length - 2; i++) out.push(drawFrom(flowFrom(out[i - 1])));
       dominant = Math.random() < 0.82 ? 5 : 7;
@@ -829,6 +829,82 @@
       return r && LENGTHS.indexOf(r.len) > -1 && r.at === Math.floor(r.at) && r.at >= 0 && r.at <= n;
     }).slice(0, MAX_RESTS);
   }
+  /* ---------- a voice's own time --------------------------------------------
+     A note on the staff is a voice's part in one chord, and by default it is
+     one note the length of the chord. It may instead be cut into several, one
+     after another, which between them fill the chord exactly: that is how a
+     voice comes to move while the others hold. The cut is kept on the note
+     as segs, each a pitch and a length, and is there only when there is more
+     than one of them; a note without it is the single note it always was.
+
+     The note's own step and staff go on being what everything else reads,
+     and they are kept at the first of its pitches that is a tone of the
+     chord — the note the voice has in that chord once whatever decorates it
+     is taken away. Leaving the chord, the voice is on the last of them. */
+  function divided(n){ return !!(n.segs && n.segs.length > 1); }
+  function isTone(slot, step){ return chordLetters(state.chords[slot]).indexOf(step % 7) > -1; }
+  function segsOf(n){
+    if (!divided(n)) return [{ step:n.step, staff:n.staff, len:lenOf(n.slot), at:0, k:0, tie:!!n.tie }];
+    var at = 0;
+    return n.segs.map(function(s, k){
+      var seg = { step:s.step, staff:s.staff, len:s.len, at:at, k:k, tie:!!s.tie };
+      at += s.len;
+      return seg;
+    });
+  }
+  function headOf(n){
+    var segs = segsOf(n), i;
+    for (i = 0; i < segs.length; i++) if (isTone(n.slot, segs[i].step)) return segs[i];
+    return segs[0];
+  }
+  function tailOf(n){
+    var segs = segsOf(n), i;
+    for (i = segs.length - 1; i >= 0; i--) if (isTone(n.slot, segs[i].step)) return segs[i];
+    return segs[segs.length - 1];
+  }
+  /* after a cut has been changed: the note is read off it again, and a cut
+     that has come down to one piece is no cut */
+  function settle(n){
+    if (!n.segs) return;
+    if (n.segs.length < 2){
+      if (n.segs.length){
+        n.step = n.segs[0].step; n.staff = n.segs[0].staff;
+        if (n.segs[0].tie) n.tie = true; else delete n.tie;
+      }
+      delete n.segs;
+      return;
+    }
+    var h = headOf(n);
+    n.step = h.step; n.staff = h.staff;
+  }
+  function copyNote(n){
+    var c = { slot:n.slot, step:n.step, staff:n.staff, voice:n.voice };
+    if (n.tie) c.tie = true;
+    if (divided(n)) c.segs = n.segs.map(function(s){
+      var o = { step:s.step, staff:s.staff, len:s.len };
+      if (s.tie) o.tie = true;
+      return o;
+    });
+    return c;
+  }
+  /* what a note is beyond its place: how it is cut, and what it is tied to */
+  function figSig(n){
+    return (n.tie ? "~" : "") + (divided(n) ? "(" + n.segs.map(function(s){
+      return s.step + s.staff.charAt(0) + s.len + (s.tie ? "~" : ""); }).join(" ") + ")" : "");
+  }
+  /* a chord whose length has been changed under a cut takes the cut away */
+  function tidyNotes(){
+    state.notes.forEach(function(n){
+      if (!n.segs) return;
+      var sum = 0, h;
+      n.segs.forEach(function(s){ sum += s.len; });
+      if (n.segs.length > 1 && sum === lenOf(n.slot)) return;
+      h = n.segs.length > 1 ? headOf(n) : n.segs[0];
+      if (h){ n.step = h.step; n.staff = h.staff; }
+      delete n.segs;
+    });
+  }
+
   /* A length that is not one note is written as several tied together. From
      the start of a bar the biggest note that fits goes first, dotted ones
      included, as a bar is usually read. Coming up to a bar line it is the
@@ -851,30 +927,36 @@
      a note up to the line tied to a note after it, and a rest is simply
      divided there. So every event is a row of parts, each a single note
      value in a single bar, and it is the parts that are drawn. */
+  /* a span of time cut into single note values, bar by bar */
+  function partsFrom(abs, len){
+    var bar = barLen(), pos = abs % bar, barNo = Math.floor(abs / bar), left = len, first = true, out = [];
+    while (left > 0){
+      var take = Math.min(left, bar - pos);
+      var sizes = (first && take === left && LENGTHS.indexOf(take) > -1) ? [take] : piecesOf(take, pos === 0);
+      sizes.forEach(function(size){
+        out.push({ len:size, pos:pos, bar:barNo, abs:barNo * bar + pos });
+        pos += size;
+      });
+      left -= take;
+      first = false;
+      if (pos >= bar){ pos = 0; barNo++; }
+    }
+    return out;
+  }
   function timeline(){
-    var events = [], n = state.chords.length, bar = barLen(), pos = 0, barNo = 0, total = 0, i;
+    var events = [], n = state.chords.length, bar = barLen(), total = 0, i;
     for (i = 0; i <= n; i++){
       state.rests.forEach(function(r, j){ if (r.at === i) events.push({ rest:j, len:r.len }); });
       if (i < n) events.push({ slot:i, len:lenOf(i) });
     }
     events.forEach(function(e){
-      var left = e.len, first = true;
-      e.pos = pos; e.bar = barNo; e.parts = [];
-      while (left > 0){
-        var take = Math.min(left, bar - pos);
-        var sizes = (first && take === left) ? [take] : piecesOf(take, pos === 0);
-        sizes.forEach(function(size){
-          e.parts.push({ len:size, pos:pos, bar:barNo });
-          pos += size;
-        });
-        left -= take;
-        first = false;
-        if (pos >= bar){ pos = 0; barNo++; }
-      }
+      e.abs = total;                                     /* sixteenths from the start */
+      e.pos = total % bar; e.bar = Math.floor(total / bar);
+      e.parts = partsFrom(total, e.len);
       e.tied = e.parts.length > 1;                       /* more than one note to say it */
       e.crosses = e.parts[e.parts.length - 1].bar > e.bar;
-      e.closes = pos === 0;                              /* it ends exactly on a bar line */
       total += e.len;
+      e.closes = total % bar === 0;                      /* it ends exactly on a bar line */
     });
     return { events:events, bars:Math.ceil(total / bar), short:(bar - total % bar) % bar,
              crossing:events.filter(function(e){ return e.crosses && e.slot != null; }) };
@@ -882,7 +964,7 @@
   function eventOf(slot){
     var found = null;
     timeline().events.forEach(function(e){ if (e.slot === slot) found = e; });
-    return found || { pos:0, bar:0, len:4, parts:[], crosses:false };
+    return found || { abs:0, pos:0, bar:0, len:4, parts:[], crosses:false };
   }
 
   /* The time signature stands after the key signature and takes its width
@@ -893,7 +975,8 @@
      and the shortest still get enough for an accidental and for the tones
      listed above the chord to stand clear of the next. */
   var ROOM = { 16:1.9, 12:1.65, 8:1.4, 6:1.2, 4:1, 3:0.92, 2:0.86, 1:0.8 }, COLUMN = 108;
-  var SLOT_X = [], SLOT_END = [], COLS = [], BAR_X = [];
+  var SLOT_X = [], SLOT_END = [], SLOT_ABS = [], COLS = [], BAR_X = [];
+  var MOMENTS = [], MOMENT_X = {}, laidKey = "";
   function staffStart(){ return SIG_X + sigWidth(S) + TIME_W + 46; }
   /* the parts of everything, in a row: each a note or a rest of one value */
   function columnsOf(events){
@@ -901,36 +984,82 @@
     events.forEach(function(e){
       e.parts.forEach(function(part, k){
         cols.push({ slot:e.slot, rest:e.rest, part:k, of:e.parts.length, len:part.len,
-                    pos:part.pos, bar:part.bar });
+                    pos:part.pos, bar:part.bar, abs:part.abs });
       });
     });
     return cols;
   }
-  function spanOf(cols){
+  /* Every moment at which something begins: a chord or a tied part of one, a
+     rest, and any note a voice starts inside a chord. Each is one place
+     across the staff, and what stands between two of them is the time from
+     the one to the next, however that time is written. */
+  function momentsOf(events){
+    var at = {}, list = [], starts = {};
+    function put(abs, slot, rest){
+      if (at[abs]) return;
+      at[abs] = { abs:abs, slot:slot == null ? null : slot, rest:rest == null ? null : rest };
+      list.push(at[abs]);
+    }
+    events.forEach(function(e){
+      if (e.slot != null) starts[e.slot] = e.abs;
+      e.parts.forEach(function(p){ put(p.abs, e.slot, e.rest); });
+    });
+    state.notes.forEach(function(n){
+      if (!divided(n) || starts[n.slot] == null) return;
+      segsOf(n).forEach(function(seg){
+        partsFrom(starts[n.slot] + seg.at, seg.len).forEach(function(p){ put(p.abs, n.slot, null); });
+      });
+    });
+    list.sort(function(a, b){ return a.abs - b.abs; });
+    list.forEach(function(m, i){ m.gap = i + 1 < list.length ? list[i + 1].abs - m.abs : 0; });
+    return list;
+  }
+  function momentKey(moments){ return moments.map(function(m){ return m.abs; }).join(","); }
+  /* room for a stretch of time that is not one note value lies between the
+     two values either side of it */
+  function roomFor(gap){
+    if (ROOM[gap]) return ROOM[gap];
+    var lo = 1, hi = 16;
+    LENGTHS.forEach(function(l){ if (l < gap && l > lo) lo = l; if (l > gap && l < hi) hi = l; });
+    return ROOM[lo] + (ROOM[hi] - ROOM[lo]) * (gap - lo) / (hi - lo);
+  }
+  function spanOf(moments){
     var total = 0, i;
-    for (i = 0; i + 1 < cols.length; i++) total += COLUMN * ROOM[cols[i].len];
+    for (i = 0; i + 1 < moments.length; i++) total += COLUMN * roomFor(moments[i].gap);
     return total;
   }
   /* where every chord stands, and with it every tied part, rest and bar line */
   function layoutSlots(){
-    var cols = columnsOf(timeline().events), first = staffStart(), last = CANVAS - 62, xs = [], i;
-    COLS = cols; BAR_X = []; SLOT_END = [];
-    if (!cols.length) return xs;
-    var total = spanOf(cols), k = total > 0 ? Math.min(1, (last - first) / total) : 1;
+    var events = timeline().events, cols = columnsOf(events), moments = momentsOf(events);
+    var first = staffStart(), last = CANVAS - 62, xs = [], i;
+    COLS = cols; MOMENTS = moments; MOMENT_X = {}; BAR_X = []; SLOT_END = []; SLOT_ABS = [];
+    laidKey = momentKey(moments);
+    if (!moments.length) return xs;
+    var total = spanOf(moments), k = total > 0 ? Math.min(1, (last - first) / total) : 1;
     var x = first + ((last - first) - total * k) / 2, bar = barLen();
+    moments.forEach(function(m){
+      m.x = x; MOMENT_X[m.abs] = x;
+      if (m.gap) x += COLUMN * roomFor(m.gap) * k;
+    });
+    events.forEach(function(e){ if (e.slot != null) SLOT_ABS[e.slot] = e.abs; });
     cols.forEach(function(c){
-      c.x = x;
+      c.x = MOMENT_X[c.abs];
       if (c.slot != null){
-        if (c.part === 0) xs[c.slot] = x;
-        SLOT_END[c.slot] = x;
+        if (c.part === 0) xs[c.slot] = c.x;
+        SLOT_END[c.slot] = c.x;
       }
-      x += COLUMN * ROOM[c.len] * k;
     });
     /* a bar line stands nearer the note it comes before than the one it follows */
-    for (i = 0; i + 1 < cols.length; i++)
-      if (cols[i].pos + cols[i].len >= bar)
-        BAR_X.push(cols[i + 1].x - Math.min(40, (cols[i + 1].x - cols[i].x) / 2));
+    for (i = 0; i + 1 < moments.length; i++)
+      if (Math.floor(moments[i + 1].abs / bar) > Math.floor(moments[i].abs / bar))
+        BAR_X.push(moments[i + 1].x - Math.min(40, (moments[i + 1].x - moments[i].x) / 2));
     return xs;
+  }
+  /* the staff fitted and drawn again, for a progression or a rhythm that has changed */
+  function relayout(){
+    fitStaff();
+    SLOT_X = layoutSlots();
+    drawStaff();
   }
   /* Below the phone breakpoint the staff stops shrinking to fit. The canvas
      is cut to the progression — 108 units between columns, the spacing a
@@ -949,10 +1078,11 @@
      columns and ran one chord's tone letters into the next one's. */
   var MIN_UNIT_PX = 7.5 / HALF;          /* what a half-step must not go under */
   function canvasFor(){
-    return Math.max(640, Math.round(staffStart() + spanOf(columnsOf(timeline().events)) + 62));
+    return Math.max(640, Math.round(staffStart() + spanOf(momentsOf(timeline().events)) + 62));
   }
   function fitStaff(){
     tidyRhythm();
+    tidyNotes();
     CANVAS = canvasFor();
     svg.setAttribute("viewBox", "0 0 " + CANVAS + " " + VIEW_H);
     if (narrow()){
@@ -1042,10 +1172,10 @@
      parts are as much its chord as the first is */
   function slotAt(x){
     var best = 0, bd = Infinity, i, d;
-    for (i = 0; i < COLS.length; i++){
-      if (COLS[i].slot == null) continue;
-      d = Math.abs(x - COLS[i].x);
-      if (d < bd){ bd = d; best = COLS[i].slot; }
+    for (i = 0; i < MOMENTS.length; i++){
+      if (MOMENTS[i].slot == null) continue;
+      d = Math.abs(x - MOMENTS[i].x);
+      if (d < bd){ bd = d; best = MOMENTS[i].slot; }
     }
     return best;
   }
@@ -1563,11 +1693,12 @@
       return Math.round(a[i] + (b[i] - a[i]) * t);
     }).join(",") + ")";
   }
-  function noteColor(n){
+  function noteColor(n, step){
     /* A wrong note is marked when the checklist says so, not while it is
        being written — the staff stays plain notation until it is checked,
        and editing anything clears the report and the red with it. */
-    if (report && n.slot < report.depth && !isChordTone(n)) return "var(--wrong)";
+    if (report && n.slot < report.depth && !isTone(n.slot, step == null ? n.step : step))
+      return "var(--wrong)";
     var t = tintOf(n.slot);
     return t <= 0 ? "var(--ink)"
          : t >= 1 ? "var(--accent)"
@@ -1584,7 +1715,6 @@
     for (var i = 0; i < COLS.length; i++) if (COLS[i].slot === slot && COLS[i].part === 0) return COLS[i];
     return null;
   }
-  function colsOf(slot){ return COLS.filter(function(c){ return c.slot === slot; }); }
   /* A tie: a shallow curve from one notehead to the same note in the next
      part, thicker in the middle than at its ends. It goes on the side away
      from the rest of the chord — over the upper notes on a staff and under
@@ -1773,7 +1903,7 @@
         function close(){ if (run.length > 1) beamRun(run, staff); run = []; }
         g.list.forEach(function(e){
           var notes = state.notes.filter(function(n){
-            return n.slot === e.slot && n.staff === staff && !(drag && drag.note === n);
+            return n.slot === e.slot && n.staff === staff && !divided(n) && !(drag && drag.note === n);
           });
           if (notes.length) run.push({ e:e, notes:notes }); else close();
         });
@@ -1785,6 +1915,7 @@
 
   /* ---------- staff state -------------------------------------------------- */
   var hover = null, hoverNear = false, drag = null, press = null, cursor = null;
+  var DRAWN = [];                          /* every notehead on the staff, and whose it is */
   var touching = false;                    /* a finger is down, not a cursor */
   var keyboard = false, lastClick = null;
 
@@ -1863,16 +1994,14 @@
   function stateKey(){
     var marks = Object.keys(state.marks).filter(function(k){ return state.marks[k]; }).sort()
       .map(function(k){ return k + "=" + state.marks[k]; }).join(",");
-    return state.notes.map(function(n){ return n.slot + ":" + n.step + ":" + n.staff; })
+    return state.notes.map(function(n){ return n.slot + ":" + n.step + ":" + n.staff + figSig(n); })
              .sort().join(",") + "|" + marks;
   }
   function snapshot(){
     var marks = {};
     Object.keys(state.marks).forEach(function(k){ marks[k] = state.marks[k]; });
     return { key:stateKey(), marks:marks,
-             notes:state.notes.map(function(n){
-               return { slot:n.slot, step:n.step, staff:n.staff, voice:n.voice };
-             }) };
+             notes:state.notes.map(copyNote) };
   }
   function resetHistory(){ undoStack = []; redoStack = []; undoNow = null; }
   function settleHistory(){
@@ -1885,9 +2014,7 @@
     undoNow = snapshot();
   }
   function restore(to){
-    state.notes = to.notes.map(function(n){
-      return { slot:n.slot, step:n.step, staff:n.staff, voice:n.voice };
-    });
+    state.notes = to.notes.map(copyNote);
     state.marks = {};
     Object.keys(to.marks).forEach(function(k){ state.marks[k] = to.marks[k]; });
     undoNow = to;
@@ -1919,6 +2046,9 @@
     if (!report) flowAt = null;
     if (proposal && proposal.key !== notesKey()){ proposal = null; stopHearing(); }
     settleHistory();
+    /* a voice that has started moving inside a chord has made a new place
+       across the staff, and everything is set out again around it */
+    if (!stage.hidden && momentKey(momentsOf(timeline().events)) !== laidKey) relayout();
     tintVars = null;                       /* re-read the palette, in case the theme moved */
     if (playingSlot !== tintTo){            /* a chord started or stopped sounding */
       tintFrom = tintTo; tintTo = playingSlot; tintAt = performance.now();
@@ -1931,23 +2061,34 @@
     var beams = beamPlan();
     beams.shapes.forEach(function(shape){ layerNotes.appendChild(shape); });
     var headHalf = glyphW("noteheadBlack", S) / 2;
-    state.notes.forEach(function(n,i){
-      if (drag && drag.note === n) return;
-      /* the chord that is sounding colours itself, so the ear and the eye
-         are on the same chord */
-      var color = noteColor(n), parts = colsOf(n.slot), together, above;
-      parts.forEach(function(col, k){
-        layerNotes.appendChild(noteGroup(n,{ color:color, stem: stemFor(n), col:col,
-                                             bare: beams.bare.indexOf(n.slot + ":" + n.step + ":" + n.staff + ":" + k) > -1 }));
-        if (!k) return;
-        if (above == null){
-          together = state.notes.filter(function(m){ return m.slot === n.slot && m.staff === n.staff; })
-                               .sort(function(a, b){ return a.step - b.step; });
-          above = together.length > 1 ? together.indexOf(n) >= together.length / 2
-                                      : n.step >= STAVES[n.staff].mid;
-        }
-        layerNotes.appendChild(tieShape(parts[k - 1].x + headHalf + 2.5, col.x - headHalf - 2.5,
-                                        yOf(n.step, n.staff), above, color));
+    DRAWN = [];
+    state.notes.forEach(function(n){
+      var whole = !divided(n), base = SLOT_ABS[n.slot] || 0, together, above;
+      if (drag && drag.note === n && whole) return;
+      segsOf(n).forEach(function(seg){
+        if (drag && drag.note === n && drag.k === seg.k) return;
+        /* the chord that is sounding colours itself, so the ear and the eye
+           are on the same chord */
+        var color = noteColor(n, seg.step), last = null;
+        partsFrom(base + seg.at, seg.len).forEach(function(part, j){
+          var x = MOMENT_X[part.abs];
+          if (x == null) return;
+          layerNotes.appendChild(noteGroup({ slot:n.slot, step:seg.step, staff:seg.staff },
+            { color:color, stem: stemFor(n), col:{ x:x, len:part.len, part:j },
+              bare: whole && beams.bare.indexOf(n.slot + ":" + n.step + ":" + n.staff + ":" + j) > -1 }));
+          DRAWN.push({ note:n, k:seg.k, abs:part.abs, x:x, step:seg.step, staff:seg.staff });
+          if (j){
+            if (above == null){
+              together = state.notes.filter(function(m){ return m.slot === n.slot && m.staff === seg.staff; })
+                                   .sort(function(a, b){ return a.step - b.step; });
+              above = together.length > 1 ? together.indexOf(n) >= together.length / 2
+                                          : seg.step >= STAVES[seg.staff].mid;
+            }
+            layerNotes.appendChild(tieShape(last + headHalf + 2.5, x - headHalf - 2.5,
+                                            yOf(seg.step, seg.staff), above, color));
+          }
+          last = x;
+        });
       });
     });
     /* an answer on offer: not on the staff yet, and drawn so as to say so */
@@ -2314,14 +2455,15 @@
     }
   }
   /* one row per chord, each indexed by voice: 0 Bass, 1 Tenor, 2 Alto, 3 Soprano */
-  function chordVoices(){
+  function chordVoices(leaving){
     if (!firstChordVoices()) return null;            /* nothing has fixed them yet */
     var rows = [], slot, row;
     for (slot = 0; slot < state.chords.length; slot++){
       row = voiceRowOf(slot);
       rows.push(row ? row.map(function(n){
-        return { step:n.step, letter:n.step % 7, staff:n.staff,
-                 midi:midiAt(slot, n.step), name:nameAt(slot, n.step) };
+        var at = leaving ? tailOf(n) : headOf(n);
+        return { step:at.step, letter:at.step % 7, staff:at.staff, k:at.k, of:n,
+                 midi:midiAt(slot, at.step), name:nameAt(slot, at.step) };
       }) : null);
     }
     return rows;
@@ -2450,8 +2592,10 @@
       };
     }
 
-    var rows = chordVoices();
+    var rows = chordVoices(), outs = chordVoices(true);
     function voicesAt(slot){ return (rows && rows[slot]) || voicesOf(slot); }
+    /* the same voices as they leave the chord, which is where a move starts */
+    function leavingAt(slot){ return (outs && outs[slot]) || voicesOf(slot); }
 
     state.chords.slice(0, depth).forEach(function(degree, slot){
       var v = voicesAt(slot), tones = chordLetters(degree), counts = {};
@@ -2683,7 +2827,7 @@
 
     /* what happens between one chord and the next */
     for (var i = 0; i + 1 < depth; i++){
-      var a = voicesAt(i), b = voicesAt(i + 1);
+      var a = leavingAt(i), b = voicesAt(i + 1);
       var add = block([i, " \u2192 ", i + 1]);
       if (a.length !== MAX_VOICES || b.length !== MAX_VOICES) continue;
 
@@ -3083,7 +3227,7 @@
   /* ---------- reporting it ------------------------------------------------ */
   var report = null, reportKey = "";
   function notesKey(){
-    return state.notes.map(function(n){ return n.slot + ":" + n.step; }).sort().join(",") +
+    return state.notes.map(function(n){ return n.slot + ":" + n.step + figSig(n); }).sort().join(",") +
            "|" + state.chords.join("") + "|" + state.tonic + state.mode;
   }
   function itemRow(item){
@@ -3309,22 +3453,43 @@
   /* Each chord in turn for as long as it is written, and silence for as long
      as a rest is. The tempo is the crotchet's, so a minim takes two of its
      beats and a semiquaver a quarter of one. */
+  function soundPlan(){
+    var events = timeline().events, at = {}, list = [], end = 0;
+    function moment(abs){
+      if (!at[abs]){ at[abs] = { abs:abs, slot:null, notes:[] }; list.push(at[abs]); }
+      return at[abs];
+    }
+    events.forEach(function(e){
+      var m = moment(e.abs);
+      end = e.abs + e.len;
+      if (e.slot == null) return;
+      m.slot = e.slot;
+      state.notes.forEach(function(n){
+        if (n.slot !== e.slot) return;
+        segsOf(n).forEach(function(seg){
+          var then = moment(e.abs + seg.at);
+          then.slot = e.slot;
+          then.notes.push({ slot:n.slot, step:seg.step, len:seg.len });
+        });
+      });
+    });
+    list.sort(function(a, b){ return a.abs - b.abs; });
+    list.forEach(function(m, i){ m.gap = (i + 1 < list.length ? list[i + 1].abs : end) - m.abs; });
+    return list;
+  }
   function playProgression(){
     if (playTimer){ stopPlayback(); return; }
     if (ringTimer){ clearTimeout(ringTimer); ringTimer = null; playingSlot = null; }
     audio();
     playBtn.textContent = "Stop";
-    var events = timeline().events, at = 0;
+    var plan = soundPlan(), at = 0, bar = barLen();
     (function next(){
-      if (at >= events.length){ stopPlayback(); return; }
-      var e = events[at++], ms = chordMs() * e.len / 4;
-      if (e.slot != null){
-        var weight = beatWeight(e.pos);
-        playingSlot = e.slot;
-        notesIn(e.slot).forEach(function(n){ play(e.slot, n.step, Math.max(ms * 1.6, 260), weight); });
-      } else playingSlot = null;
+      if (at >= plan.length){ stopPlayback(); return; }
+      var m = plan[at++], beat = chordMs(), weight = beatWeight(m.abs % bar);
+      playingSlot = m.slot;
+      m.notes.forEach(function(n){ play(n.slot, n.step, Math.max(beat * n.len / 4 * 1.6, 260), weight); });
       render();
-      playTimer = setTimeout(next, ms);
+      playTimer = setTimeout(next, beat * m.gap / 4);
     })();
   }
 
@@ -4669,7 +4834,9 @@
           staged:!stage.hidden, sevenths:sevenths, tempo:+tempo.value, meter:state.meter,
           lens:state.lens, rests:state.rests,
           notes:state.notes.map(function(n){
-            return { slot:n.slot, step:n.step, staff:n.staff };
+            var c = copyNote(n);
+            delete c.voice;
+            return c;
           })
         });
       } catch (e) { return; }
@@ -4697,14 +4864,27 @@
             return r && LENGTHS.indexOf(r.len) > -1 && r.at === Math.floor(r.at) &&
                    r.at >= 0 && r.at <= was.chords.length; }))) return false;
     if (!Array.isArray(was.notes)) return false;
-    var perSlot = {}, perPlace = {}, i, n, at;
+    var perSlot = {}, perPlace = {}, i, n, at, j, sum;
+    function placed(x){
+      return !!x && x.step === Math.floor(x.step) && x.step >= STAVES.bass.lowest &&
+             x.step <= STAVES.treble.highest && (x.staff === "bass" || x.staff === "treble") &&
+             (x.tie == null || x.tie === true);
+    }
     for (i = 0; i < was.notes.length; i++){
       n = was.notes[i];
       if (!n || n.slot !== Math.floor(n.slot) || n.slot < 0 || n.slot >= was.chords.length)
         return false;
-      if (n.step !== Math.floor(n.step) || n.step < STAVES.bass.lowest ||
-          n.step > STAVES.treble.highest) return false;
-      if (n.staff !== "bass" && n.staff !== "treble") return false;
+      if (!placed(n)) return false;
+      /* a cut has to fill its chord, neither more nor less */
+      if (n.segs != null){
+        if (!Array.isArray(n.segs) || n.segs.length < 2 || n.segs.length > 16) return false;
+        for (j = 0, sum = 0; j < n.segs.length; j++){
+          if (!placed(n.segs[j]) || n.segs[j].len !== Math.floor(n.segs[j].len) ||
+              n.segs[j].len < 1) return false;
+          sum += n.segs[j].len;
+        }
+        if (sum !== (was.lens ? was.lens[n.slot] : 4)) return false;
+      }
       perSlot[n.slot] = (perSlot[n.slot] || 0) + 1;
       if (perSlot[n.slot] > MAX_VOICES) return false;
       at = n.slot + ":" + n.step;
@@ -4731,7 +4911,9 @@
     state.live = was.live || "";
     state.marks = was.marks || {};
     state.notes = was.notes.map(function(n){
-      return { slot:n.slot, step:n.step, staff:n.staff };
+      var c = copyNote(n);
+      delete c.voice;
+      return c;
     });
     sevenths = !!was.sevenths;
     state.meter = was.meter === 3 ? 3 : 4;         /* sessions from before there was a choice are in four */
