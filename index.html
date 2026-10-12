@@ -1085,7 +1085,7 @@
   /* The room after a moment. A chord wants its full room, having its tones
      listed over it and its numeral under; a note a voice starts inside a
      chord has neither, and stands closer to what is either side of it. */
-  var INNER_ROOM = 0.75;
+  var INNER_ROOM = 0.6;
   function strideOf(moments, i){
     if (i + 1 >= moments.length) return 0;
     return COLUMN * roomFor(moments[i].gap) * (moments[i].inner || moments[i + 1].inner ? INNER_ROOM : 1);
@@ -1864,6 +1864,7 @@
      to a quaver takes a stub of one, pointing at the note it belongs with. */
   var BEAM_THICK = S / 2, BEAM_GAP = S * 0.75, BEAM_STUB = S * 1.1, STEM_MIN = 30;
   var BEAM_CEIL = 37, BEAM_FLOOR = 213, STEM_LEAST = 6;    /* clear of the tone letters, and of the numerals */
+  var STEM_IN_TOP = 114, STEM_IN_BOT = 138, STEM_IN_LEAST = 16;   /* between the staves, clear of both */
   /* Where a voice moves inside a chord the notes on its staff can no longer
      share a stem, since they no longer share a rhythm. On that staff, in that
      chord, each voice is stemmed for itself the way a chorale prints them:
@@ -1930,7 +1931,7 @@
        stems simply being shorter for it. A short stem is better than a beam
        driven through the other staff's notes, so the beam turns inward only
        where staying out would leave a stem with nothing to it at all. */
-    function fit(run, staff, up){
+    function fit(run, staff, up, voiced){
       var out = up === (staff === "treble");
       run.forEach(function(c){
         var ys = c.notes.map(function(n){ return yOf(n.step, n.staff); });
@@ -1955,6 +1956,13 @@
       var flat = null;
       if (out && up && edge < BEAM_CEIL) flat = BEAM_CEIL;
       if (out && !up && edge > BEAM_FLOOR) flat = BEAM_FLOOR;
+      /* A voice stemmed toward the other staff stops short of it, where that
+         still leaves it a stem: the tenor's stems do not climb into the
+         treble's lines, nor the alto's fall into the bass's. */
+      if (voiced && !out && up && edge < STEM_IN_TOP &&
+          run.every(function(c){ return c.top - STEM_IN_TOP >= STEM_IN_LEAST; })) flat = STEM_IN_TOP;
+      if (voiced && !out && !up && edge > STEM_IN_BOT &&
+          run.every(function(c){ return STEM_IN_BOT - c.bot >= STEM_IN_LEAST; })) flat = STEM_IN_BOT;
       function beamY(x){ return flat != null ? flat : line(x) + shift; }
       run.forEach(function(c){
         var stem = up ? c.top - beamY(c.x) : beamY(c.x) - c.bot;
@@ -1963,7 +1971,7 @@
       return { up:up, shortest:shortest, y:beamY };
     }
     function beamRun(run, staff, force){
-      var out = force ? force === "up" : staff === "treble", plan = fit(run, staff, out);
+      var out = force ? force === "up" : staff === "treble", plan = fit(run, staff, out, !!force);
       if (!force && plan.shortest < STEM_LEAST){
         var other = fit(run, staff, !out);
         if (other.shortest > plan.shortest) plan = other; else plan = fit(run, staff, out);
@@ -2014,6 +2022,9 @@
       var ys = c.notes.map(function(n){ return yOf(n.step, n.staff); });
       var top = Math.min.apply(null, ys), bot = Math.max.apply(null, ys);
       var x = c.e.x + (up ? hw - 0.7 : -hw + 0.7), tip = up ? top - 42 : bot + 42, color = noteColor(c.notes[0]);
+      var home = c.notes[0].staff;
+      if (up && home === "bass" && tip < STEM_IN_TOP && top - STEM_IN_TOP >= STEM_IN_LEAST) tip = STEM_IN_TOP;
+      if (!up && home === "treble" && tip > STEM_IN_BOT && STEM_IN_BOT - bot >= STEM_IN_LEAST) tip = STEM_IN_BOT;
       shapes.push(el("line",{ x1:x, y1: up ? bot : top, x2:x, y2:tip, stroke:color, "stroke-width":1.4 }));
       if (plain <= 2)
         shapes.push(glyph((plain === 2 ? "flag8th" : "flag16th") + (up ? "Up" : "Down"), x - 0.7, tip, S, color));
@@ -2982,7 +2993,27 @@
            : "left by " + (Math.abs(by) === 1 ? "step" : "leap") + " to " + q.name;
     }
     var FIGURE_HINT = "A note outside the chord is passed through by step, stepped to and straight " +
-                      "back from, or held over from the chord before and resolved by step.";
+                      "back from, held over and resolved by step, leapt to and resolved by step, " +
+                      "stepped to and left by leap the other way, or the next chord's note come early.";
+    /* A pedal: a voice that stays where it is while the harmony moves off
+       it and comes back. It is the one figure with no chord tone in it at
+       all — the whole of the voice's part in the chord is the held note —
+       so it is read off the chord rather than off a note inside one: the
+       same pitch throughout, belonging to a chord before, and belonging
+       again to the chord after. */
+    function pedalAt(v, slot){
+      var line = lines[v], from = firstIn[v][slot], to = lastIn[v][slot], j, back;
+      if (from == null || line[from].gap || from === 0) return null;
+      for (j = from; j <= to; j++) if (line[j].tone || line[j].step !== line[from - 1].step) return null;
+      for (back = from - 1; back >= 0 && line[back].step === line[from].step; back--){
+        if (line[back].tone) break;
+        if (line[back].gap) return null;
+      }
+      if (back < 0 || line[back].step !== line[from].step) return null;
+      var q = (to + 1 < line.length && !line[to + 1].gap) ? line[to + 1] : null;
+      if (!q) return slot === depth - 1 && depth < state.chords.length ? { from:line[back], waiting:true } : null;
+      return q.step === line[from].step ? { from:line[back], to:q } : null;
+    }
     function soundAt(v, abs){
       var line = lines[v], i;
       for (i = 0; i < line.length; i++)
@@ -3074,6 +3105,34 @@
                         " over from the chord before, where it belonged, and resolved " +
                         (down ? "down" : "up") + " by step to " + q.name + "." };
         }
+        /* An anticipation: the note the next chord is going to give this
+           voice, sounded before the chord arrives. */
+        if (outBy === 0 && q.slot > x.slot && q.tone && j === lastIn[v][x.slot])
+          return { kind:"anticipation", hear:hear, strong:"anticipation",
+                   also: weightOf(x) > weightOf(q) ? [{ level:"caution", strong:"lighter place",
+                     text:who + "'s anticipation stands on a stronger place than the " + q.name +
+                          " it anticipates. It is a light note thrown in ahead of the chord, and " +
+                          "takes the weaker place of the two." }] : [],
+                   text:who + "'s " + x.name + " is an anticipation: the note the next chord gives it, " +
+                        "arrived early" + (x.tie ? " and tied over." : ".") };
+        /* An appoggiatura: leapt to, and resolved by step. It leans as a
+           suspension does, without having been prepared, so it takes the
+           stronger place; on the weaker one the same shape is an incomplete
+           neighbour, a neighbour that has lost the note it set out from. */
+        if (Math.abs(inBy) > 1 && Math.abs(outBy) === 1)
+          return accented
+            ? { kind:"appoggiatura", hear:hear, strong:"appoggiatura",
+                text:who + "'s " + x.name + " is an appoggiatura: leapt to from " + p.name +
+                     " and resolved by step to " + q.name + ", on the stronger place of the two." }
+            : { kind:"incomplete neighbour", hear:hear, strong:"incomplete neighbour",
+                text:who + "'s " + x.name + " is an incomplete neighbour: leapt to from " + p.name +
+                     " and resolved by step to " + q.name + "." };
+        /* An escape tone: a step away, and then a leap back past where it
+           came from. */
+        if (Math.abs(inBy) === 1 && Math.abs(outBy) > 1 && inBy * outBy < 0)
+          return { kind:"escape tone", hear:hear, strong:"escape tone",
+                   text:who + "'s " + x.name + " is an escape tone: a step away from " + p.name +
+                        ", and left by leap the other way to " + q.name + "." };
       }
       return { kind:null, hear:(p || q) ? hear : null,
                text:who + " has " + x.name + " inside this chord, which is not one of its tones \u2014 " +
@@ -3156,8 +3215,26 @@
       }
 
       /* a note that is not in the chord at all */
+      var pedals = {}, pedalled = false;
       v.forEach(function(n, idx){
         if (tones.indexOf(n.letter) > -1) return;
+        var held = (lines && rows && rows[slot]) ? pedalAt(idx, slot) : null;
+        if (held){
+          pedals[idx] = pedalled = true;
+          segsOf(n.of).forEach(function(sg){ excuse(n.of, sg.k); });
+          add(held.waiting ? "note" : "ok",
+              held.waiting
+                ? VOICES[idx] + " holds " + n.name + " under a chord it is no tone of. Whether that is a " +
+                  "pedal depends on the chord after, which is not written yet."
+                : VOICES[idx] + " holds " + n.name + " through this chord, which has no " +
+                  n.name.replace(/\d+$/, "") + " in it: a pedal" + (idx ? " in an upper voice" : "") +
+                  ", kept from where it belonged and still there when the harmony comes back to it. " +
+                  "The other three voices carry the chord.",
+              "pedal", held.waiting ? null : { line:[held.from.slot].concat(
+                held.to.slot !== held.from.slot ? [slot, held.to.slot] : [slot]).filter(function(s, i, all){
+                  return all.indexOf(s) === i; }), voice:idx });
+          return;
+        }
         add("error", VOICES[idx] + " is on " + n.name + ", which is not one of this chord's tones \u2014 " +
             spell(degree) + ".", n.name);
       });
@@ -3167,7 +3244,7 @@
          while it is about it. */
       var voiced = !!(lines && rows && rows[slot]);
       v.forEach(function(n, idx){
-        if (!divided(n.of)) return;
+        if (!divided(n.of) || pedals[idx]) return;
         var who = voiced ? VOICES[idx] : "A voice", line = voiced ? lines[idx] : null, j;
         segsOf(n.of).forEach(function(sg){
           if (voiced) j = firstIn[idx][slot] + sg.k;
@@ -3260,10 +3337,12 @@
         } else if (needsFifth(slot)){
           add("error", "Missing its fifth, " + letterText(degree, l) +
               " \u2014 a diminished triad cannot do without it; the diminished fifth is what makes it one.");
-        } else if (!fifthMayGo(slot)){
+        } else if (!fifthMayGo(slot) && !pedalled){
           add("error", "Missing its fifth, " + letterText(degree, l) +
               " \u2014 this seventh chord is not standing on its root, and away from root " +
               "position it has a voice for each of its four tones and none to spare.", "fifth");
+        } else if (pedalled){
+          add("ok", "No fifth \u2014 with one voice holding the pedal, three are left to carry the chord.");
         } else if (counts[tones[0]] > (seventh ? 1 : 2)){
           add("ok", "No fifth, root " + (seventh ? "doubled" : "tripled") +
               " \u2014 the usual way to leave it out.");
