@@ -427,18 +427,20 @@
       <div class="numerals" id="numerals"></div>
       <div class="seq" id="seq"></div>
       <p class="keyline" id="progline"></p>
-      <div class="row lenrow" role="group" aria-label="Note length" id="lenrow">
-        <span class="rowlabel">Length</span>
+      <div class="row">
+        <button type="button" id="btn-seventh" aria-pressed="false">Sevenths</button>
       </div>
-      <p class="keyline" id="lennote"></p>
       <div class="row timerow" role="group" aria-label="Time signature">
-        <span class="rowlabel">Time</span>
+        <span class="rowlabel">Time signature</span>
         <button type="button" id="time-4" aria-pressed="true" title="Four beats to the bar">4/4</button>
         <button type="button" id="time-3" aria-pressed="false" title="Three beats to the bar">3/4</button>
         <span class="rownote" id="timenote"></span>
       </div>
+      <div class="row lenrow" role="group" aria-label="Note length" id="lenrow">
+        <span class="rowlabel">Length</span>
+      </div>
+      <p class="keyline" id="lennote"></p>
       <div class="row">
-        <button type="button" id="btn-seventh" aria-pressed="false">Sevenths</button>
         <button type="button" id="btn-generate"
                 title="Write a progression that moves tonic, predominant, dominant, tonic">Generate progression</button>
         <span class="spacer"></span>
