@@ -241,7 +241,7 @@
     padding:10px 14px; border-top:1px solid var(--line);
   }
   .notebar .notelens{display:inline-flex; flex-wrap:wrap; gap:4px}
-  .notebar button{padding:4px 7px}
+  .notebar button{padding:6px 10px}
   .notebar .rownote{margin-left:6px}
   .checkbar{
     display:flex; flex-wrap:wrap; align-items:center; gap:12px;
@@ -2213,22 +2213,26 @@
     }
     return n.segs;
   }
+  /* Made shorter, a note leaves what it gave up as a rest after it, which
+     is where the time between it and the next note goes in notation; made
+     longer, it takes the time from what comes after it, a rest first. */
   function canLength(n, k, len){
     var segs = segsOf(n), cur = segs[k].len, next = segs[k + 1];
     if (len === cur) return false;
-    if (len < cur) return LENGTHS.indexOf(cur - len) > -1;
+    if (len < cur) return true;
     if (!next) return false;
     var left = next.len - (len - cur);
-    return left === 0 || LENGTHS.indexOf(left) > -1;
+    return next.rest ? left >= 0 : (left === 0 || LENGTHS.indexOf(left) > -1);
   }
   function setLength(n, k, len){
     if (!canLength(n, k, len)) return;
-    var segs = cutOf(n), cur = segs[k].len, fresh;
+    var segs = cutOf(n), cur = segs[k].len;
     if (len < cur){
-      fresh = { step:segs[k].step, staff:segs[k].staff, len:cur - len };
-      if (segs[k].tie){ fresh.tie = true; delete segs[k].tie; }   /* what it was tied to is now further on */
-      segs.splice(k + 1, 0, fresh);
+      var gap = cur - len;
+      if (segs[k + 1] && segs[k + 1].rest) segs[k + 1].len += gap;
+      else segs.splice(k + 1, 0, { rest:true, staff:segs[k].staff, len:gap });
       segs[k].len = len;
+      delete segs[k].tie;                      /* it no longer reaches what it was tied to */
     } else {
       segs[k + 1].len -= len - cur;
       segs[k].len = len;
@@ -4867,26 +4871,43 @@
   var noteBtns = {}, noteSay = document.getElementById("notesay");
   var noteLeft = document.getElementById("note-left"), noteRight = document.getElementById("note-right");
   var noteTie = document.getElementById("note-tie");
+  var noteDot = false, noteDotBtn = null;
+  function wantLen(base){ return noteDot && canDot(base) ? base * 1.5 : base; }
+  /* a value chosen: it is written with from now on, and a note that is
+     selected is given it too where it can take it */
+  function chooseLen(len){
+    var s = selSeg();
+    if (s && len !== s.len && canLength(sel.note, s.k, len)){
+      setLength(sel.note, s.k, len);
+      armed = len;
+    } else armed = (s && len !== s.len) ? len : (armed === len ? null : len);
+    render();
+  }
   (function buildNoteBar(){
     var row = document.getElementById("notelens");
-    LENGTHS.forEach(function(len){
+    /* the same five values and the same Dotted as under the progression,
+       and read the same way: choose a value, and dot it or not */
+    [16, 8, 4, 2, 1].forEach(function(base){
       var b = document.createElement("button");
       b.type = "button";
-      b.title = "Write " + LEN_NAME[len] + " notes: press the staff where each one goes. " +
-                "With a note selected, this also makes it " + withArticle(LEN_NAME[len]) + ".";
-      b.setAttribute("aria-label", b.title);
-      b.appendChild(miniNote(len));
-      b.addEventListener("click", function(){
-        var s = selSeg();
-        if (s && len !== s.len && canLength(sel.note, s.k, len)){
-          setLength(sel.note, s.k, len);
-          armed = len;
-        } else armed = (s && len !== s.len) ? len : (armed === len ? null : len);
-        render();
-      });
+      b.title = "Write " + LEN_NAME[base] + " notes: press the staff where each one goes. " +
+                "With a note selected, this also makes it " + withArticle(LEN_NAME[base]) + ".";
+      b.appendChild(miniNote(base));
+      b.appendChild(document.createTextNode(LEN_WORD[base]));
+      b.addEventListener("click", function(){ chooseLen(wantLen(base)); });
       row.appendChild(b);
-      noteBtns[len] = b;
+      noteBtns[base] = b;
     });
+    noteDotBtn = document.createElement("button");
+    noteDotBtn.type = "button";
+    noteDotBtn.textContent = "Dotted";
+    noteDotBtn.title = "Dotted: half as long again";
+    noteDotBtn.addEventListener("click", function(){
+      var s = selSeg(), base = armed ? plainOf(armed) : s ? plainOf(s.len) : null;
+      noteDot = !noteDot;
+      if (base && canDot(base)) chooseLen(wantLen(base)); else render();
+    });
+    row.appendChild(noteDotBtn);
     noteLeft.addEventListener("click", function(){
       var s = selSeg();
       if (s && joinSeg(sel.note, s.k, -1)){ sel.k = s.k - 1; render(); }
@@ -4904,10 +4925,11 @@
   })();
   function renderNoteBar(){
     var s = selSeg(), n = s ? sel.note : null, count = n ? segsOf(n).length : 0;
-    LENGTHS.forEach(function(len){
-      noteBtns[len].disabled = false;
-      noteBtns[len].setAttribute("aria-pressed", String(armed === len));
+    [16, 8, 4, 2, 1].forEach(function(base){
+      noteBtns[base].setAttribute("aria-pressed", String(!!armed && plainOf(armed) === base));
     });
+    noteDotBtn.setAttribute("aria-pressed", String(noteDot));
+    noteDotBtn.disabled = !!armed && !canDot(plainOf(armed));
     noteLeft.disabled = !s || !canJoin(n, s.k, -1);
     noteRight.disabled = !s || !canJoin(n, s.k, 1);
     var tieable = !!s && !!tieTo(n, s.k);
