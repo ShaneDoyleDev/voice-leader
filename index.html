@@ -1875,14 +1875,6 @@
     }
     if (isDotted(len))
       g.appendChild(glyph("augmentationDot", x + half + 3.5, note.step % 2 === 0 ? y - HALF : y, S, color));
-    /* a finger covers the note it is placing, so while one is down the
-       preview says out loud which pitch it is on */
-    if (opts.name){
-      var tag = el("text",{x:x + half + 6, y:y + 4, fill:color, "font-size":12,
-                           "font-family":"IBM Plex Sans, sans-serif", "font-weight":600});
-      tag.textContent = opts.name;
-      g.appendChild(tag);
-    }
     if (opts.opacity != null) g.setAttribute("opacity", opts.opacity);
     var scale = opts.pop === false ? 1 : popScale(note);
     if (scale !== 1)
@@ -2552,8 +2544,7 @@
           if (x == null) return;
           layerNotes.appendChild(noteGroup({ slot:n.slot, step:seg.step, staff:seg.staff },
             { color:color, stem: stemFor(n), col:{ x:x, len:part.len, part:j || (into && into[seg.k] ? 1 : 0) },
-              name: held && touching && !j ? nameAt(n.slot, seg.step) : null,
-              bare: laned || (whole && beams.bare.indexOf(n.slot + ":" + n.step + ":" + n.staff + ":" + j) > -1) }));
+                            bare: laned || (whole && beams.bare.indexOf(n.slot + ":" + n.step + ":" + n.staff + ":" + j) > -1) }));
           DRAWN.push({ note:n, k:seg.k, abs:part.abs, x:x, step:seg.step, staff:seg.staff });
           if (j)
             layerNotes.appendChild(tieShape(last + headHalf + 2.5, x - headHalf - 2.5,
@@ -2586,22 +2577,18 @@
     }
     if (drag){
       if (!divided(drag.note))
-        layerGhost.appendChild(noteGroup(drag.note,{color:"var(--accent)", pop:false,
-          name: touching ? nameAt(drag.note.slot, drag.note.step) : null}));
+        layerGhost.appendChild(noteGroup(drag.note,{color:"var(--accent)", pop:false}));
     }
     else if (focus && armed && SLOT_X[focus.slot] != null && armed > lenOf(focus.slot))
       layerGhost.appendChild(noteGroup({ slot:focus.slot, step:focus.step, staff:focus.staff },
         { color:"var(--wrong)", opacity:0.55, pop:false,
-          col:{ x:SLOT_X[focus.slot], len:armed, part:1 },
-          name:null }));
+          col:{ x:SLOT_X[focus.slot], len:armed, part:1 } }));
     else if (writing)
       layerGhost.appendChild(noteGroup({ slot:writing.slot, step:writing.step, staff:writing.staff },
         { color:"var(--accent)", opacity:0.6, pop:false,
-          col:{ x:xAtAbs(writing.abs), len:writing.len, part:1 },
-          name:null }));
+          col:{ x:xAtAbs(writing.abs), len:writing.len, part:1 } }));
     else if (focus && indexAt(focus.slot, focus.step) === -1 && !slotFull(focus.slot))
-      layerGhost.appendChild(noteGroup(focus,{color:"var(--accent)", opacity:0.55, pop:false,
-        name: touching ? nameAt(focus.slot, focus.step) : null}));
+      layerGhost.appendChild(noteGroup(focus,{color:"var(--accent)", opacity:0.55, pop:false}));
 
     /* A cross under a chord empties it, offered as soon as there is a note
        of yours in it. Only while the pointer is in that column, though — the
