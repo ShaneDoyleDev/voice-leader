@@ -862,28 +862,46 @@
   function divided(n){ return !!(n.segs && n.segs.length > 1); }
   function isTone(slot, step){ return chordLetters(state.chords[slot]).indexOf(step % 7) > -1; }
   function segsOf(n){
-    if (!divided(n)) return [{ step:n.step, staff:n.staff, len:lenOf(n.slot), at:0, k:0, tie:!!n.tie }];
+    if (!divided(n)) return [{ step:n.step, staff:n.staff, len:lenOf(n.slot), at:0, k:0, tie:!!n.tie, rest:false }];
     var at = 0;
     return n.segs.map(function(s, k){
-      var seg = { step:s.step, staff:s.staff, len:s.len, at:at, k:k, tie:!!s.tie };
+      var seg = { step:s.step, staff:s.staff || n.staff, len:s.len, at:at, k:k, tie:!!s.tie, rest:!!s.rest };
       at += s.len;
       return seg;
     });
   }
+  /* A voice that is silent for a stretch of its chord has that stretch
+     written as a rest, a piece of the cut like any other but with no pitch.
+     A voice that comes in late, or goes out early, is how a chord is begun
+     before all four of its voices are there. Everything that reads a note by
+     its pitches reads only the pieces that sound. */
+  function soundingOf(n){ return segsOf(n).filter(function(s){ return !s.rest; }); }
   function headOf(n){
-    var segs = segsOf(n), i;
+    var segs = soundingOf(n), i;
     for (i = 0; i < segs.length; i++) if (isTone(n.slot, segs[i].step)) return segs[i];
-    return segs[0];
+    return segs[0] || segsOf(n)[0];
   }
   function tailOf(n){
-    var segs = segsOf(n), i;
+    var segs = soundingOf(n), i;
     for (i = segs.length - 1; i >= 0; i--) if (isTone(n.slot, segs[i].step)) return segs[i];
-    return segs[segs.length - 1];
+    return segs[segs.length - 1] || segsOf(n)[0];
+  }
+  /* a stretch of silence as the fewest rests there are values for */
+  function restsFor(len, staff){
+    var out = [], k;
+    while (len > 0){
+      for (k = 0; LENGTHS[k] > len; k++){}
+      out.push({ rest:true, staff:staff, len:LENGTHS[k] });
+      len -= LENGTHS[k];
+    }
+    return out;
   }
   /* after a cut has been changed: the note is read off it again, and a cut
      that has come down to one piece is no cut */
   function settle(n){
     if (!n.segs) return;
+    /* a voice with nothing left to sound is no voice at all */
+    if (n.segs.every(function(s){ return s.rest; })){ n.dead = true; return; }
     if (n.segs.length < 2){
       if (n.segs.length){
         n.step = n.segs[0].step; n.staff = n.segs[0].staff;
@@ -900,6 +918,7 @@
     if (n.tie) c.tie = true;
     if (divided(n)) c.segs = n.segs.map(function(s){
       var o = { step:s.step, staff:s.staff, len:s.len };
+      if (s.rest) o.rest = true;
       if (s.tie) o.tie = true;
       return o;
     });
@@ -908,7 +927,7 @@
   /* what a note is beyond its place: how it is cut, and what it is tied to */
   function figSig(n){
     return (n.tie ? "~" : "") + (divided(n) ? "(" + n.segs.map(function(s){
-      return s.step + s.staff.charAt(0) + s.len + (s.tie ? "~" : ""); }).join(" ") + ")" : "");
+      return (s.rest ? "r" : s.step) + String(s.staff).charAt(0) + s.len + (s.tie ? "~" : ""); }).join(" ") + ")" : "");
   }
   /* A tie joins a note to the same pitch where it leaves off, so that it is
      held and not struck again: the next note of its own voice inside the
@@ -1715,7 +1734,7 @@
     if (clean)
       lines.forEach(function(line){
         for (var j = 1; j < line.length; j++)
-          if (!line[j].gap) strokes.push({ order:line[j - 1].slot, a:line[j - 1], b:line[j] });
+          if (!line[j].gap && !line[j].rested) strokes.push({ order:line[j - 1].slot, a:line[j - 1], b:line[j] });
       });
     else (report.parallels || []).forEach(function(p){
       p.pairs.forEach(function(pair){ strokes.push({ order:p.move, a:pair[0], b:pair[1] }); });
@@ -2074,6 +2093,7 @@
           var lane = lanes[key] = lanes[key] || { dir:l.dir, at:{}, list:[] };
           dirs.set(l.note, l.dir);
           segsOf(l.note).forEach(function(seg){
+            if (seg.rest) return;
             partsFrom(base + seg.at, seg.len).forEach(function(part, j){
               var x = MOMENT_X[part.abs], ck = part.abs + ":" + part.len, c = lane.at[ck];
               if (x == null) return;
@@ -2180,8 +2200,8 @@
   var sel = null;
   function selSeg(){
     if (!sel || state.notes.indexOf(sel.note) < 0) return null;
-    var segs = segsOf(sel.note);
-    return segs[Math.min(sel.k, segs.length - 1)];
+    var segs = segsOf(sel.note), seg = segs[Math.min(sel.k, segs.length - 1)];
+    return seg.rest ? null : seg;
   }
   function lenWords(len){ return LEN_NAME[len] || len + " sixteenths"; }
   /* the note as a cut, whether or not it has been cut yet */
@@ -2233,7 +2253,7 @@
      It applies once a chord has all four of its voices, since a voice's notes
      are what fills its chord, and the chord is what has to be written first.
      Short of that a press writes the chord's notes as it always has. */
-  var armed = null;
+  var armed = null, FIFTH = 4;
   function chordAt(abs){
     var found = null;
     timeline().events.forEach(function(e){
@@ -2245,19 +2265,31 @@
   function writeFor(f){
     if (!armed || !f || drag) return null;
     var abs = f === cursor ? cursorAbs() : absAtX(f.x), e = chordAt(abs);
-    if (!e || armed >= e.len || slotCount(e.slot) !== MAX_VOICES) return null;
+    if (!e || armed >= e.len) return null;
     var g = gridOf(armed), t = Math.round((abs - e.abs) / g) * g;
     t = clamp(t, 0, Math.floor((e.len - armed) / g) * g);
-    var best = null, bestD = Infinity;
+    var whole = slotCount(e.slot) >= MAX_VOICES, best = null, bestD = Infinity, bestSteps = Infinity;
     notesIn(e.slot).forEach(function(n){
-      segsOf(n).forEach(function(seg){
-        if (seg.at > t || t >= seg.at + seg.len) return;
-        var dist = Math.abs(midiAt(e.slot, seg.step) - midiAt(e.slot, f.step));
-        if (dist < bestD){ bestD = dist; best = n; }
+      var segs = segsOf(n), here = null, near = null, d1 = Infinity;
+      segs.forEach(function(seg){
+        if (seg.at <= t && t < seg.at + seg.len) here = seg;
+        if (!seg.rest){
+          var dd = Math.abs(midiAt(e.slot, seg.step) - midiAt(e.slot, f.step));
+          if (dd < d1){ d1 = dd; near = seg; }
+        }
       });
+      if (!here || !near) return;
+      /* in a whole chord the nearest voice is the one written over, and one
+         that is resting there is as good a candidate as one sounding; in a
+         chord still being written nothing that sounds is written over, and
+         a voice that is resting joins in only if the note is near its own */
+      if (!whole && !here.rest) return;
+      if (!whole && Math.abs(near.step - f.step) > FIFTH) return;
+      if (d1 < bestD){ bestD = d1; best = n; bestSteps = Math.abs(near.step - f.step); }
     });
-    if (!best) return null;
-    return { slot:e.slot, note:best, t:t, len:armed, abs:e.abs + t, step:f.step, staff:f.staff };
+    if (!best && whole) return null;
+    return { slot:e.slot, note:best, fresh:!best, t:t, len:armed, abs:e.abs + t, step:f.step, staff:f.staff,
+             chord:e.len };
   }
   /* a stretch that is not one note value, as the fewest that are, tied */
   function laidOut(len, step, staff){
@@ -2271,29 +2303,46 @@
     return out;
   }
   function writeNote(w){
-    var n = w.note, segs = segsOf(n), end = w.t + w.len, out = [], at = 0, placed = false, at2 = -1;
-    var tail = segs[segs.length - 1], leave = !!tail.tie && tail.step;
+    var n = w.note, end = w.t + w.len, out = [], at = 0, placed = false, at2 = -1, leave = false;
+    var segs;
+    if (w.fresh){
+      /* a voice that was not there: it rests until it comes in, and again
+         after it has gone */
+      n = w.note = { slot:w.slot, step:w.step, staff:w.staff, segs:[] };
+      segs = restsFor(w.chord, w.staff);
+      segs = [{ rest:true, staff:w.staff, len:w.chord }];
+      state.notes.push(n);
+    } else segs = segsOf(n);
+    var tail = segs[segs.length - 1];
+    leave = !w.fresh && !!tail.tie && tail.step;
+    function rested(len, s){
+      return s.rest ? restsFor(len, s.staff) : laidOut(len, s.step, s.staff);
+    }
     segs.forEach(function(s){
       var a = at, b = at + s.len;
       at = b;
-      if (b <= w.t || a >= end){ out.push({ step:s.step, staff:s.staff, len:s.len, tie:s.tie }); return; }
+      if (b <= w.t || a >= end){
+        out.push(s.rest ? { rest:true, staff:s.staff, len:s.len }
+                        : { step:s.step, staff:s.staff, len:s.len, tie:s.tie });
+        return;
+      }
       if (!placed){
-        if (a < w.t) laidOut(w.t - a, s.step, s.staff).forEach(function(p){ out.push(p); });
+        if (a < w.t) rested(w.t - a, s).forEach(function(p){ out.push(p); });
         at2 = out.length;
         out.push({ step:w.step, staff:w.staff, len:w.len });
         placed = true;
       }
-      if (b > end) laidOut(b - end, s.step, s.staff).forEach(function(p){ out.push(p); });
+      if (b > end) rested(b - end, s).forEach(function(p){ out.push(p); });
     });
     /* a tie is only ever to the same pitch next, and the one out of the
        chord goes on belonging to the note that leaves it */
     out.forEach(function(s, i){
-      if (s.tie && !(out[i + 1] && out[i + 1].step === s.step)) delete s.tie;
+      if (s.tie && !(out[i + 1] && !out[i + 1].rest && out[i + 1].step === s.step)) delete s.tie;
       if (!s.tie) delete s.tie;
     });
     delete n.tie;
     n.segs = out;
-    if (leave && out[out.length - 1].step === leave) out[out.length - 1].tie = true;
+    if (leave && !out[out.length - 1].rest && out[out.length - 1].step === leave) out[out.length - 1].tie = true;
     settle(n);
     return divided(n) ? at2 : 0;
   }
@@ -2396,6 +2445,11 @@
     });
     /* first, whether the last report still describes the staff: the notes
        below are drawn in its colours, so it cannot be tested after them */
+    /* a voice that has been taken down to rests is gone */
+    if (state.notes.some(function(n){ return n.dead; })){
+      state.notes = state.notes.filter(function(n){ return !n.dead; });
+      if (sel && state.notes.indexOf(sel.note) < 0) sel = null;
+    }
     if (report && reportKey !== notesKey()) report = null;
     if (!report) flowAt = null;
     if (proposal && proposal.key !== notesKey()){ proposal = null; stopHearing(); }
@@ -2440,6 +2494,23 @@
       if (drag && drag.note === n && whole) return;
       if (laned && dir) above = dir === "up";      /* a voice's ties go the way its stems do */
       segsOf(n).forEach(function(seg){
+        if (seg.rest){
+          /* silence: a rest on the voice's own staff, set higher or lower
+             where there is another voice on it to be told apart from */
+          partsFrom(base + seg.at, seg.len).forEach(function(part){
+            var x = MOMENT_X[part.abs];
+            if (x == null) return;
+            var plain = plainOf(part.len), staff = seg.staff;
+            var name = plain === 16 ? "restWhole" : plain === 8 ? "restHalf" : plain === 4 ? "restQuarter"
+                     : plain === 2 ? "rest8th" : "rest16th";
+            var w = glyphW(name, S), ry = STAVES[staff].topY + (plain === 16 ? 1 : 2) * S +
+                    (laned && dir ? (dir === "up" ? -S : S) : 0);
+            layerNotes.appendChild(glyph(name, x - w / 2, ry, S, "var(--ink-soft)"));
+            if (isDotted(part.len))
+              layerNotes.appendChild(glyph("augmentationDot", x + w / 2 + 3, ry - 0.5 * S, S, "var(--ink-soft)"));
+          });
+          return;
+        }
         /* the chord that is sounding colours itself, so the ear and the eye
            are on the same chord; a note being moved is drawn as one in hand */
         var held = drag && drag.note === n && drag.k === seg.k;
@@ -2490,7 +2561,7 @@
       layerGhost.appendChild(noteGroup({ slot:writing.slot, step:writing.step, staff:writing.staff },
         { color:"var(--accent)", opacity:0.6, pop:false,
           col:{ x:xAtAbs(writing.abs), len:writing.len, part:1 },
-          name:(writing.note.voice != null ? VOICE_SHORT[writing.note.voice] + " " : "") +
+          name:(writing.note && writing.note.voice != null ? VOICE_SHORT[writing.note.voice] + " " : "") +
                nameAt(writing.slot, writing.step) }));
     else if (focus && indexAt(focus.slot, focus.step) === -1 && !slotFull(focus.slot))
       layerGhost.appendChild(noteGroup(focus,{color:"var(--accent)", opacity:0.55, pop:false,
@@ -2614,14 +2685,12 @@
           tag.textContent = VOICE_SHORT[voice];
           tag.title = VOICES[voice];
           part.appendChild(tag);
-          part.appendChild(document.createTextNode(n.of && divided(n.of)
-            ? segsOf(n.of).map(function(sg){ return nameAt(slot, sg.step); }).join("\u2013") : n.name));
+          part.appendChild(document.createTextNode(n.of && divided(n.of) ? noteText(n.of, slot) : n.name));
           s.appendChild(part);
         });
       } else {
-        s.textContent = bySlot[slot].map(function(n){ return n.step; })
-          .sort(function(a,b){return a-b;})
-          .map(function(step){ return nameAt(slot, step); }).join("  ");
+        s.textContent = bySlot[slot].slice().sort(function(a, b){ return a.step - b.step; })
+          .map(function(n){ return noteText(n, slot); }).join("  ");
       }
       box.appendChild(b); box.appendChild(s);
       li.appendChild(box);
@@ -2671,6 +2740,15 @@
                 : (off === -2 && !perfect) ? "diminished" : null;
     var name = ORDINALS[dia] || (dia + 1) + "th";
     return quality ? quality + " " + name : name;
+  }
+  /* a voice in a chord as it reads across: its notes in order, rests left out */
+  function noteText(n, slot, long){
+    var segs = segsOf(n);
+    if (segs.length === 1) return nameAt(slot, segs[0].step);
+    return segs.map(function(sg){
+      if (sg.rest) return long ? "rest (" + lenWords(sg.len) + ")" : null;
+      return nameAt(slot, sg.step) + (long ? " (" + lenWords(sg.len) + ")" : "");
+    }).filter(Boolean).join(long ? ", " : "\u2013");
   }
   function withArticle(str){ return (/^[aeiou]/i.test(str) ? "an " : "a ") + str; }
   /* An interval read along one voice rather than across two. The notes are
@@ -2871,18 +2949,20 @@
   }
   function voiceLines(depth){
     if (!firstChordVoices()) return null;
-    var lines = [[], [], [], []], gap = [false, false, false, false], slot, row;
+    var lines = [[], [], [], []], gap = [false, false, false, false], rested = [false, false, false, false], slot, row;
     for (slot = 0; slot < Math.min(depth, state.chords.length); slot++){
       row = voiceRowOf(slot);
       if (!row){ gap = [true, true, true, true]; continue; }
       row.forEach(function(n, v){
         var segs = segsOf(n), base = slotStart(slot);
         segs.forEach(function(seg){
+          if (seg.rest){ rested[v] = true; return; }
           lines[v].push({ slot:slot, voice:v, of:n, k:seg.k, step:seg.step, staff:seg.staff,
                           letter:seg.step % 7, midi:midiAt(slot, seg.step), name:nameAt(slot, seg.step),
                           abs:base + seg.at, len:seg.len, tone:isTone(slot, seg.step), tie:seg.tie,
-                          gap:gap[v] });
+                          gap:gap[v], rested:rested[v] });
           gap[v] = false;
+          rested[v] = false;
         });
       });
     }
@@ -3118,7 +3198,7 @@
        again to the chord after. */
     function pedalAt(v, slot){
       var line = lines[v], from = firstIn[v][slot], to = lastIn[v][slot], j, back;
-      if (from == null || line[from].gap || from === 0) return null;
+      if (from == null || line[from].gap || line[from].rested || from === 0) return null;
       for (j = from; j <= to; j++) if (line[j].tone || line[j].step !== line[from - 1].step) return null;
       for (back = from - 1; back >= 0 && line[back].step === line[from].step; back--){
         if (line[back].tone) break;
@@ -3137,8 +3217,8 @@
     }
     function figureOf(v, j){
       var line = lines[v], x = line[j], who = VOICES[v];
-      var p = (j > 0 && !x.gap) ? line[j - 1] : null;
-      var q = (j + 1 < line.length && !line[j + 1].gap) ? line[j + 1] : null;
+      var p = (j > 0 && !x.gap && !x.rested) ? line[j - 1] : null;
+      var q = (j + 1 < line.length && !line[j + 1].gap && !line[j + 1].rested) ? line[j + 1] : null;
       var inBy = p ? x.step - p.step : null, outBy = q ? q.step - x.step : null;
       var hear = { seq:[p, x, q].filter(Boolean).map(function(n){ return [{ slot:n.slot, step:n.step }]; }) };
       /* the last chord written so far, with more to come: the note may yet
@@ -3271,7 +3351,7 @@
             n = lines[v][j];
             if (n.abs > t || t >= n.abs + n.len) continue;
             now[v] = n;
-            came[v] = (n.abs === t && j > firstIn[v][slot]) ? lines[v][j - 1] : null;
+            came[v] = (n.abs === t && j > firstIn[v][slot] && !n.rested) ? lines[v][j - 1] : null;
           }
         for (lo = 0; lo < MAX_VOICES; lo++)
           for (hi = lo + 1; hi < MAX_VOICES; hi++){
@@ -3319,9 +3399,12 @@
         v.forEach(function(n){
           if (!divided(n.of)) return;
           segsOf(n.of).forEach(function(sg){
-            if (sg.k === n.k || isTone(slot, sg.step)) return;
-            add("error", "A note on " + nameAt(slot, sg.step) + " is not one of this chord's tones \u2014 " +
-                spell(degree) + ".", nameAt(slot, sg.step));
+            if (sg.rest || sg.k === n.k || isTone(slot, sg.step)) return;
+            /* what a note outside the chord is depends on the line it is in,
+               which is not there to be read until all four voices are */
+            add("note", "A note on " + nameAt(slot, sg.step) + " inside this chord is not one of its tones \u2014 " +
+                spell(degree) + ". It is read as a figure once all four voices are written.");
+            excuse(n.of, sg.k);
           });
         });
         add("note", (wantsAt(slot, true) || "This chord has " + v.length + " notes so far.") +
@@ -3362,8 +3445,11 @@
         if (!divided(n.of) || pedals[idx]) return;
         var who = voiced ? VOICES[idx] : "A voice", line = voiced ? lines[idx] : null, j;
         segsOf(n.of).forEach(function(sg){
-          if (voiced) j = firstIn[idx][slot] + sg.k;
-          if (voiced && sg.k > 0){
+          if (sg.rest) return;
+          if (voiced){
+            for (j = firstIn[idx][slot]; j <= lastIn[idx][slot]; j++) if (line[j].k === sg.k) break;
+          }
+          if (voiced && j > firstIn[idx][slot]){
             lineChecks(add, idx, (j > 1 && !line[j - 1].gap) ? line[j - 2] : null, line[j - 1], line[j],
                        seqOf(line[j - 1], line[j]),
                        (j > 1 && !line[j - 1].gap) ? seqOf(line[j - 2], line[j - 1], line[j]) : null);
@@ -4235,7 +4321,7 @@
       state.notes.forEach(function(n){
         if (n.slot !== e.slot) return;
         segsOf(n).forEach(function(seg){
-          if (heldOver.get(n) && heldOver.get(n)[seg.k]) return;      /* held, not struck */
+          if (seg.rest || (heldOver.get(n) && heldOver.get(n)[seg.k])) return;      /* silent, or held and not struck */
           var then = moment(e.abs + seg.at);
           then.slot = e.slot;
           then.notes.push({ slot:n.slot, step:seg.step, len:heldLen(n, seg.k) });
@@ -4365,7 +4451,7 @@
        to it — the cross is offered on that, so it has to redraw on it too */
     var near = Math.abs(p.x - SLOT_X[t2.slot]) <= 30;
     var wt = writeFor(t2);
-    t2.cell = wt ? wt.abs + "/" + wt.step + "/" + state.notes.indexOf(wt.note) : "";
+    t2.cell = wt ? wt.abs + "/" + wt.step + "/" + (wt.note ? state.notes.indexOf(wt.note) : "new") : "";
     if (!hover || hover.slot !== t2.slot || hover.step !== t2.step ||
         hover.staff !== t2.staff || near !== hoverNear || hover.cell !== t2.cell){
       hover = t2;
@@ -4473,10 +4559,12 @@
     if (Math.hypot(p.x - from.x, p.y - from.y) > far){  /* a drag across empty staff, not a click */
       hover = targetAt(p); render(); return;
     }
-    var t = targetAt(p), wrote = writeFor(t);
+    var t = targetAt(p), wrote = writeFor(t), wk;
     lastClick = null;
     if (wrote){
-      sel = { note:wrote.note, k:writeNote(wrote) };
+      wk = writeNote(wrote);
+      if (wrote.fresh) startPop(wrote.slot, wrote.step, wrote.staff);
+      sel = { note:wrote.note, k:wk };
     } else if (indexAt(t.slot, t.step) === -1 && !slotFull(t.slot)){
       state.notes.push(t);
       startPop(t.slot, t.step, t.staff);
@@ -4512,7 +4600,7 @@
     MOMENTS.forEach(function(m){ if (m.slot != null) at[m.abs] = m.slot; });
     if (armed) timeline().events.forEach(function(e){
       var g = gridOf(armed), t;
-      if (e.slot == null || armed >= e.len || slotCount(e.slot) !== MAX_VOICES) return;
+      if (e.slot == null || armed >= e.len) return;
       for (t = 0; t + armed <= e.len; t += g) at[e.abs + t] = e.slot;
     });
     Object.keys(at).forEach(function(k){ list.push({ abs:+k, slot:at[k] }); });
@@ -4539,7 +4627,8 @@
         if (hit) takeOff(hit.note, hit.k);
         else if (writeFor(cursor)){
           fresh = writeFor(cursor);
-          sel = { note:fresh.note, k:writeNote(fresh) };
+          var wk = writeNote(fresh);
+          sel = { note:fresh.note, k:wk };
           fresh = null;
         }
         else if (indexAt(cursor.slot, cursor.step) === -1 && !slotFull(cursor.slot)){
@@ -4824,8 +4913,8 @@
     var tieable = !!s && !!tieTo(n, s.k);
     noteTie.disabled = !tieable;
     noteTie.setAttribute("aria-pressed", String(tieable && s.tie));
-    var writes = armed ? "Writing " + LEN_NAME[armed] + " notes: press the staff where one goes. A chord " +
-                         "takes them once it has all four voices. Esc stops." : "";
+    var writes = armed ? "Writing " + LEN_NAME[armed] + " notes: press the staff where one goes. A voice " +
+                         "rests until its first note. Esc stops." : "";
     noteSay.textContent = !s
       ? (writes || (state.notes.length
            ? "Pick a note value to write with, or select a note to give it a length of its own." : ""))
@@ -5652,14 +5741,12 @@
       if (row){
         for (v = MAX_VOICES - 1; v >= 0; v--)
           out.push("     " + padTo(VOICES[v], 9) + (divided(row[v].of)
-            ? segsOf(row[v].of).map(function(sg){
-                return nameAt(slot, sg.step) + " (" + lenWords(sg.len) + ")"; }).join(", ")
-            : row[v].name));
+            ? noteText(row[v].of, slot, true) : row[v].name));
       } else {
         /* fewer than four notes, so no voices have been worked out: bottom
            up is all that can honestly be said */
         notes.slice().reverse().forEach(function(n){
-          out.push("     " + padTo("", 9) + nameAt(slot, n.step));
+          out.push("     " + padTo("", 9) + (divided(n) ? noteText(n, slot, true) : nameAt(slot, n.step)));
         });
         out.push("     (" + notes.length + " notes so far, voices not yet fixed)");
       }
@@ -5788,6 +5875,9 @@
                    r.at >= 0 && r.at <= was.chords.length; }))) return false;
     if (!Array.isArray(was.notes)) return false;
     var perSlot = {}, perPlace = {}, i, n, at, j, sum;
+    function silent(x){
+      return !!x && x.rest === true && (x.staff === "bass" || x.staff === "treble") && x.tie == null;
+    }
     function placed(x){
       return !!x && x.step === Math.floor(x.step) && x.step >= STAVES.bass.lowest &&
              x.step <= STAVES.treble.highest && (x.staff === "bass" || x.staff === "treble") &&
@@ -5801,11 +5891,14 @@
       /* a cut has to fill its chord, neither more nor less */
       if (n.segs != null){
         if (!Array.isArray(n.segs) || n.segs.length < 2 || n.segs.length > 16) return false;
+        var sounds = 0;
         for (j = 0, sum = 0; j < n.segs.length; j++){
-          if (!placed(n.segs[j]) || n.segs[j].len !== Math.floor(n.segs[j].len) ||
+          if (!(silent(n.segs[j]) || placed(n.segs[j])) || n.segs[j].len !== Math.floor(n.segs[j].len) ||
               n.segs[j].len < 1) return false;
+          if (!n.segs[j].rest) sounds++;
           sum += n.segs[j].len;
         }
+        if (!sounds) return false;
         if (sum !== (was.lens ? was.lens[n.slot] : 4)) return false;
       }
       perSlot[n.slot] = (perSlot[n.slot] || 0) + 1;
