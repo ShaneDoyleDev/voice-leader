@@ -2258,27 +2258,19 @@
      are what fills its chord, and the chord is what has to be written first.
      Short of that a press writes the chord's notes as it always has. */
   var armed = null, FIFTH = 4;
-  /* A note longer than its chord cannot be written inside it, so writing one
-     makes the chord that long: every voice holds on for the extra time, and a
-     voice that moves is given a rest for it, or its last note is carried on
-     where it is the note being made longer. The chords after are put back
-     by that much, and undo takes it all back together. */
-  function growTo(slot, newLen, extend){
-    var old = lenOf(slot), more = newLen - old;
-    if (more <= 0 || LENGTHS.indexOf(newLen) < 0) return false;
-    state.notes.forEach(function(n){
-      if (n.slot !== slot || !divided(n)) return;
-      var last = n.segs[n.segs.length - 1];
-      if (n === extend){ last.len += more; return; }
-      delete last.tie;                               /* it no longer reaches the chord's end */
-      if (last.rest) last.len += more;
-      else n.segs.push({ rest:true, staff:last.staff || n.staff, len:more });
-    });
-    state.lens[slot] = newLen;
-    return true;
+  /* Chord lengths are set under the progression and the staff never changes
+     them. A note value longer than the chord it is pressed in cannot be
+     written there, so the press is refused, and the reason is given. */
+  var noteRefusal = "";
+  function tooLong(slot, len){
+    return "Chord " + (slot + 1) + " is " + withArticle(LEN_NAME[lenOf(slot)]) + " long, so " +
+           withArticle(LEN_NAME[len]) + " note does not fit in it. Chord lengths are set under the " +
+           "progression, in \u201CChange key or progression\u201D \u2014 choose a shorter value to write here.";
   }
-  function growForArmed(slot){
-    if (armed && slot != null && armed > lenOf(slot)) growTo(slot, armed);
+  function refuses(slot){
+    if (!armed || slot == null || armed <= lenOf(slot)) return false;
+    noteRefusal = tooLong(slot, armed);
+    return true;
   }
   function chordAt(abs){
     var found = null;
@@ -2600,9 +2592,9 @@
     }
     else if (focus && armed && SLOT_X[focus.slot] != null && armed > lenOf(focus.slot))
       layerGhost.appendChild(noteGroup({ slot:focus.slot, step:focus.step, staff:focus.staff },
-        { color:"var(--accent)", opacity:0.6, pop:false,
+        { color:"var(--wrong)", opacity:0.55, pop:false,
           col:{ x:SLOT_X[focus.slot], len:armed, part:1 },
-          name:nameAt(focus.slot, focus.step) + " \u00B7 chord becomes " + withArticle(LEN_NAME[armed]) }));
+          name:"too long for this chord" }));
     else if (writing)
       layerGhost.appendChild(noteGroup({ slot:writing.slot, step:writing.step, staff:writing.staff },
         { color:"var(--accent)", opacity:0.6, pop:false,
@@ -4606,9 +4598,12 @@
       hover = targetAt(p); render(); return;
     }
     var t = targetAt(p), wrote, wk;
-    growForArmed(t.slot);
-    wrote = writeFor(t);
     lastClick = null;
+    if (refuses(t.slot)){                     /* nothing is written, and the note row says why */
+      hover = t; setCursor(p); render(); return;
+    }
+    noteRefusal = "";
+    wrote = writeFor(t);
     if (wrote){
       wk = writeNote(wrote);
       if (wrote.fresh) startPop(wrote.slot, wrote.step, wrote.staff);
@@ -4673,7 +4668,8 @@
       case "Enter": case " ":
         hit = drawnAt(cursorAbs(), cursor.step);
         if (hit) takeOff(hit.note, hit.k);
-        else if (growForArmed(cursor.slot), writeFor(cursor)){
+        else if (refuses(cursor.slot)){ /* refused: the note row says why */ }
+        else if (writeFor(cursor)){
           fresh = writeFor(cursor);
           var wk = writeNote(fresh);
           sel = { note:fresh.note, k:wk };
@@ -4919,17 +4915,18 @@
   function wantLen(base){ return noteDot && canDot(base) ? base * 1.5 : base; }
   /* a value chosen: it is written with from now on, and a note that is
      selected is given it too where it can take it */
-  function canGrow(n, k, len){
-    var s = segsOf(n);
-    return !s[k + 1] && len > s[k].len && LENGTHS.indexOf(lenOf(n.slot) + len - s[k].len) > -1;
-  }
   function chooseLen(len){
     var s = selSeg();
+    noteRefusal = "";
+    /* a selected note made longer than there is time for after it: said, not done */
+    if (s && len > s.len && !canLength(sel.note, s.k, len))
+      noteRefusal = segsOf(sel.note)[s.k + 1]
+        ? "That note cannot be that long: the note after it would be left with a length that is not a " +
+          "note value. Take that note out first, or choose a shorter value."
+        : "That note cannot be longer: it is the last in its chord, and there is no time after it to " +
+          "take. Chord lengths are set under the progression.";
     if (s && len !== s.len && canLength(sel.note, s.k, len)){
       setLength(sel.note, s.k, len);
-      armed = len;
-    } else if (s && len > s.len && canGrow(sel.note, s.k, len)){
-      growTo(sel.note.slot, lenOf(sel.note.slot) + len - s.len, sel.note);
       armed = len;
     } else armed = (s && len !== s.len) ? len : (armed === len ? null : len);
     render();
@@ -4987,9 +4984,11 @@
     var tieable = !!s && !!tieTo(n, s.k);
     noteTie.disabled = !tieable;
     noteTie.setAttribute("aria-pressed", String(tieable && s.tie));
+    var live = armed && hover && !drag && hover.slot != null && armed > lenOf(hover.slot)
+             ? tooLong(hover.slot, armed) : "";
     var writes = armed ? "Writing " + LEN_NAME[armed] + " notes: press the staff where one goes. A voice " +
                          "rests until its first note. Esc stops." : "";
-    noteSay.textContent = !s
+    noteSay.textContent = live ? live : noteRefusal ? noteRefusal : !s
       ? (writes || (state.notes.length
            ? "Pick a note value to write with, or select a note to give it a length of its own." : ""))
       : (writes ? writes + " \u2014 " : "") + (n.voice != null ? VOICES[n.voice] + ", chord " : "Chord ") + (n.slot + 1) + ": " +
@@ -5773,6 +5772,7 @@
   });
   document.addEventListener("keydown", function(e){
     if (e.key !== "Escape") return;
+    noteRefusal = "";
     if (proposal){ e.preventDefault(); dropProposal(); }
     else if (sel && !stage.hidden){ sel = null; render(); }
     else if (armed && !stage.hidden){ armed = null; render(); }
