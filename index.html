@@ -2593,13 +2593,12 @@
       layerGhost.appendChild(noteGroup({ slot:focus.slot, step:focus.step, staff:focus.staff },
         { color:"var(--wrong)", opacity:0.55, pop:false,
           col:{ x:SLOT_X[focus.slot], len:armed, part:1 },
-          name:"too long for this chord" }));
+          name:null }));
     else if (writing)
       layerGhost.appendChild(noteGroup({ slot:writing.slot, step:writing.step, staff:writing.staff },
         { color:"var(--accent)", opacity:0.6, pop:false,
           col:{ x:xAtAbs(writing.abs), len:writing.len, part:1 },
-          name:(writing.note && writing.note.voice != null ? VOICE_SHORT[writing.note.voice] + " " : "") +
-               nameAt(writing.slot, writing.step) }));
+          name:null }));
     else if (focus && indexAt(focus.slot, focus.step) === -1 && !slotFull(focus.slot))
       layerGhost.appendChild(noteGroup(focus,{color:"var(--accent)", opacity:0.55, pop:false,
         name: touching ? nameAt(focus.slot, focus.step) : null}));
@@ -4983,11 +4982,9 @@
     var tieable = !!s && !!tieTo(n, s.k);
     noteTie.disabled = !tieable;
     noteTie.setAttribute("aria-pressed", String(tieable && s.tie));
-    var live = armed && hover && !drag && hover.slot != null && armed > lenOf(hover.slot)
-             ? tooLong(hover.slot, armed) : "";
     var writes = armed ? "Writing " + LEN_NAME[armed] + " notes: press the staff where one goes. A voice " +
                          "rests until its first note. Esc stops." : "";
-    noteSay.textContent = live ? live : noteRefusal ? noteRefusal : !s
+    noteSay.textContent = noteRefusal ? noteRefusal : !s
       ? (writes || (state.notes.length
            ? "Pick a note value to write with, or select a note to give it a length of its own." : ""))
       : (writes ? writes + " \u2014 " : "") + (n.voice != null ? VOICES[n.voice] + ", chord " : "Chord ") + (n.slot + 1) + ": " +
